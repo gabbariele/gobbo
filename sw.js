@@ -1,11 +1,11 @@
 /* Gobbo - service worker minimale.
    Il guscio dell'app va in cache così si apre anche senza rete;
    le chiamate a Gemini passano sempre dalla rete (mai cache). */
-var CACHE = 'gobbo-v1';
+var CACHE = 'gobbo-v2';
 var SHELL = [
   './',
   './index.html',
-  './manifest.webmanifest',
+  './manifest.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

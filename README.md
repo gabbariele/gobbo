@@ -147,7 +147,7 @@ sito cancella anche la chiave.
 
 ```
 index.html            tutta l'app (interfaccia + logica + prompt)
-manifest.webmanifest  metadati PWA per l'installazione
+manifest.json         metadati PWA per l'installazione
 sw.js                 service worker: guscio in cache, si apre anche offline
 icons/                icone 192 / 512 / maskable
 ```
