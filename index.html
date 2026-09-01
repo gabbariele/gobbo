@@ -168,9 +168,13 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
     <h2>Impostazioni</h2>
 
     <label>Chiave API Gemini</label>
-    <input type="password" id="fKey" placeholder="Incolla qui la chiave" autocomplete="off">
-    <div class="hint">Resta solo su questo telefono (localStorage), non viene mai inviata altrove.
-      Creala gratis su <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></div>
+    <div class="two" style="align-items:stretch">
+      <div><input type="password" id="fKey" placeholder="Incolla qui la chiave" autocomplete="off"></div>
+      <button class="btn sec" id="bCheck" style="flex:0 0 auto;height:auto;padding:0 16px">Verifica</button>
+    </div>
+    <div class="hint" id="keyMsg">Resta solo su questo telefono (localStorage), non viene mai inviata altrove.
+      Creala gratis su <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+      «Verifica» controlla la chiave e riempie l’elenco dei modelli con quelli davvero disponibili.</div>
 
     <label>Contesto del convegno</label>
     <textarea id="fCtx" style="min-height:80px"
@@ -181,9 +185,11 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
       <div>
         <label>Modello</label>
         <select id="fModel">
-          <option value="gemini-2.5-flash">2.5 Flash</option>
-          <option value="gemini-2.5-flash-lite">2.5 Flash-Lite</option>
-          <option value="gemini-2.5-pro">2.5 Pro</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash (consigliato)</option>
+          <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (più rapido)</option>
+          <option value="gemini-3.7-flash">gemini-3.7-flash (più capace)</option>
+          <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash (legacy)</option>
         </select>
       </div>
       <div>
@@ -191,7 +197,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
         <input type="number" id="fPause" min="1" max="15" step="0.5">
       </div>
     </div>
-    <div class="hint">Flash-Lite = massima velocità. Pro = più profondo ma più lento.</div>
+    <div class="hint">Flash-Lite = massima velocità. 3.7 Flash = più profondo, un filo più lento. Dal palco conta la velocità.</div>
 
     <div class="row"><input type="checkbox" id="fFast"><label for="fFast">Modalità veloce (niente ragionamento esteso)</label></div>
     <div class="row"><input type="checkbox" id="fAuto"><label for="fAuto">Analizza da solo mentre parlo</label></div>
@@ -220,7 +226,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <script>
 /* ============================ stato ============================ */
 var LS = 'gobbo.v1';
-var D = {key:'', ctx:'', model:'gemini-2.5-flash', pause:2.5, fast:true, auto:true, src:false, wake:true};
+var D = {key:'', ctx:'', model:'gemini-3.5-flash', pause:2.5, fast:true, auto:true, src:false, wake:true, models:[]};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
@@ -230,6 +236,8 @@ var full = '';       // trascrizione della sessione (contesto)
 var silenceT = null, inflight = false, wakeLock = null;
 var usedPhilos = []; // per non ripetere sempre lo stesso filosofo
 var MIN_AUTO = 120;  // caratteri minimi perche scatti l analisi automatica (un pensiero compiuto)
+var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere quanto aspettare prima di riavviarlo
+var API = 'https://generativelanguage.googleapis.com/v1beta/';
 
 function $(id){ return document.getElementById(id); }
 var out = $('out'), dot = $('dot'), stat = $('status'), live = $('live');
@@ -279,17 +287,16 @@ function ask(testo, contesto){
   if (usedPhilos.length) u += '\n\nFilosofi già usati poco fa, evitali: ' + usedPhilos.join(', ') + '.';
 
   var gc = { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 1.0 };
-  if (C.fast && C.model.indexOf('flash') >= 0) gc.thinkingConfig = { thinkingBudget: 0 };
+  if (C.fast) { var tc = fastThinking(C.model); if (tc) gc.thinkingConfig = tc; }
 
   var ctrl = new AbortController();
   var to = setTimeout(function(){ ctrl.abort(); }, 30000);
 
-  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
-            encodeURIComponent(C.model) + ':generateContent?key=' + encodeURIComponent(C.key);
+  var url = API + 'models/' + encodeURIComponent(C.model) + ':generateContent';
 
   return fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': C.key },
     signal: ctrl.signal,
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SYS }] },
@@ -305,6 +312,7 @@ function ask(testo, contesto){
     return r.json().catch(function(){ return null; }).then(function(j){
       var m = (j && j.error && j.error.message) ? j.error.message : (r.status + ' ' + r.statusText);
       if (r.status === 400 && /API key/i.test(m)) m = 'Chiave API non valida';
+      else if (r.status === 400 && /thinking/i.test(m)) m = 'Questo modello non accetta la modalità veloce: spegnila nelle impostazioni o cambia modello';
       if (r.status === 404) m = 'Modello "' + C.model + '" non disponibile per questa chiave - provane un altro nelle impostazioni';
       if (r.status === 429) m = 'Quota esaurita (429). Riprova tra poco.';
       throw new Error(m);
@@ -322,6 +330,60 @@ function ask(testo, contesto){
   });
 }
 
+/* Il modo per ridurre il "ragionamento" cambia tra le famiglie di modelli:
+   2.5 -> thinkingBudget (0 = spento, solo sui flash); 3.x -> thinkingLevel
+   ("minimal" dove esiste, altrimenti "low", accettato da tutti i 3.x). */
+function fastThinking(m){
+  if (/^gemini-2\.5-flash/.test(m)) return { thinkingBudget: 0 };
+  if (/^gemini-2\./.test(m)) return null;                 // 2.5-pro non si spegne
+  if (/^gemini-3\.7-flash/.test(m)) return { thinkingLevel: 'low' };
+  if (/^gemini-3\.[56]-flash/.test(m)) return { thinkingLevel: 'minimal' };
+  return { thinkingLevel: 'low' };
+}
+
+/* ============================ verifica chiave / elenco modelli ============================ */
+function checkKey(){
+  var k = $('fKey').value.trim(), msg = $('keyMsg');
+  if (!k) { msg.textContent = 'Incolla prima la chiave.'; return; }
+  msg.textContent = 'Verifico…';
+  fetch(API + 'models?pageSize=200', { headers: { 'x-goog-api-key': k } })
+    .then(function(r){ return r.json().catch(function(){ return null; }).then(function(j){ return { r: r, j: j }; }); })
+    .then(function(x){
+      if (!x.r.ok) throw new Error((x.j && x.j.error && x.j.error.message) || (x.r.status + ' ' + x.r.statusText));
+      var ids = (x.j.models || []).filter(function(m){
+        var n = m.name.replace(/^models\//, '');
+        return /^gemini-\d/.test(n)
+          && (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0
+          && !/tts|image|embedding|live|audio|robotics|computer-use|-exp/.test(n);
+      }).map(function(m){ return m.name.replace(/^models\//, ''); });
+      if (!ids.length) throw new Error('chiave valida ma nessun modello di testo disponibile');
+      C.models = ids; save();
+      fillModels(ids);
+      msg.textContent = 'Chiave valida: ' + ids.length + ' modelli disponibili, elenco aggiornato qui sotto.';
+    })
+    .catch(function(e){ msg.textContent = 'Errore: ' + e.message; });
+}
+
+function fillModels(ids){
+  var sel = $('fModel'), cur = sel.value;
+  ids = ids.slice().sort(function(a, b){
+    var fa = /flash/.test(a), fb = /flash/.test(b);
+    if (fa !== fb) return fa ? -1 : 1;                    // i flash in cima: sono quelli da palco
+    return b.localeCompare(a, undefined, { numeric: true }); // versione piu alta prima
+  });
+  sel.innerHTML = '';
+  for (var i = 0; i < ids.length; i++) {
+    var o = document.createElement('option'); o.value = ids[i]; o.textContent = ids[i]; sel.appendChild(o);
+  }
+  ensureOption(sel, cur); sel.value = cur;
+}
+
+function ensureOption(sel, v){
+  if (!v) return;
+  for (var i = 0; i < sel.options.length; i++) if (sel.options[i].value === v) return;
+  var o = document.createElement('option'); o.value = v; o.textContent = v; sel.insertBefore(o, sel.firstChild);
+}
+
 /* ============================ render ============================ */
 var EMPTY = '<div class="empty"><span class="big">&#127908;</span>' +
   'Parla: ti ascolto, trascrivo e ti rimando<br>' +
@@ -335,6 +397,7 @@ function render(){
   var html = '';
   for (var i = 0; i < hist.length; i++) {
     var h = hist[i];
+    if (!h || !h.r || !Array.isArray(h.r.punti)) continue;
     var lis = '';
     for (var k = 0; k < h.r.punti.length; k++) lis += '<li>' + esc(h.r.punti[k]) + '</li>';
     html +=
@@ -427,18 +490,20 @@ function startRec(){
       stopRec();
       return;
     }
-    if (e.error === 'no-speech' || e.error === 'aborted' || e.error === 'network') return;
+    lastErr = e.error;
+    if (e.error === 'network') { say('Rete instabile, riprovo…'); return; }
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
     say('Errore audio: ' + e.error, true);
   };
 
   rec.onend = function(){
     running = false;
-    if (wantOn) {
-      try { rec.start(); running = true; }
-      catch (_) { setTimeout(function(){ if (wantOn) startRec(); }, 350); }
-    } else {
-      dot.classList.remove('on');
-    }
+    if (!wantOn) { dot.classList.remove('on'); return; }
+    // Chrome chiude il riconoscimento da solo ogni tanto: lo riapro. Se e' caduta la rete
+    // aspetto di piu, altrimenti si avvita in un ciclo di start/errore.
+    var delay = lastErr === 'network' ? 2500 : 200;
+    lastErr = null;
+    setTimeout(function(){ if (wantOn && !running) startRec(); }, delay);
   };
 
   try { rec.start(); } catch (_) {}
@@ -513,6 +578,8 @@ $('now').addEventListener('click', function(){
 function openSet(){
   $('fKey').value = C.key;
   $('fCtx').value = C.ctx;
+  if (C.models && C.models.length) fillModels(C.models);
+  ensureOption($('fModel'), C.model);
   $('fModel').value = C.model;
   $('fPause').value = C.pause;
   $('fFast').checked = C.fast;
@@ -523,6 +590,7 @@ function openSet(){
 }
 
 $('bSet').addEventListener('click', openSet);
+$('bCheck').addEventListener('click', checkKey);
 
 $('bSave').addEventListener('click', function(){
   C.key = $('fKey').value.trim();

@@ -17,65 +17,99 @@ C'è anche il pulsante **✎**: scrivi (o incolli) tu un testo e ottieni le stes
 
 ## 1. Chiave API Gemini
 
-Serve una chiave gratuita:
+1. vai su **https://aistudio.google.com/apikey** → *Create API key* → copiala
+2. nell'app: **⚙ → Chiave API Gemini** → incolla → **Verifica** → **Salva**
 
-1. vai su **https://aistudio.google.com/apikey**
-2. *Create API key* → copiala
-3. nell'app: **⚙ → Chiave API Gemini** → incolla → **Salva**
+**Verifica** interroga l'API con quella chiave: ti dice se è valida e riempie l'elenco dei
+modelli con quelli davvero abilitati per il tuo account.
 
-La chiave resta nel `localStorage` del telefono. Non passa da nessun server: il telefono
-parla direttamente con Google.
+La chiave resta nel `localStorage` del telefono e viaggia solo verso Google, nell'header
+della richiesta. Non passa da nessun server intermedio.
 
-## 2. Pubblicare su GitHub Pages
+## 2. Metterla online (serve HTTPS)
 
-Il microfono nel browser funziona **solo su HTTPS** (o su `localhost`), quindi l'app va messa
-online. GitHub Pages è gratis e basta e avanza.
+Il microfono nel browser funziona **solo su HTTPS** o su `localhost`. Due strade:
 
-Dalla cartella `gobbo/`:
+**GitHub Pages** (gratis, tre clic). Il codice è già su `github.com/gabbariele/gobbo`:
+*Settings → Pages → Source: Deploy from a branch → main / (root) → Save*.
+Dopo un paio di minuti: `https://gabbariele.github.io/gobbo/`
 
-```bash
-git init && git add . && git commit -m "Gobbo: prima versione" && git branch -M main && git remote add origin https://github.com/TUO-UTENTE/gobbo.git && git push -u origin main
-```
-
-Poi su GitHub: **Settings → Pages → Source: Deploy from a branch → main / (root) → Save**.
-
-Dopo un paio di minuti l'app è su `https://TUO-UTENTE.github.io/gobbo/`.
+**Un tuo server** (Linode o altro). Basta copiare la cartella dentro una directory già
+servita in HTTPS, per esempio `https://tuodominio.it/gobbo/`. Nessun backend, nessuna
+configurazione: sono file statici. L'unica cosa che conta è che il certificato sia valido,
+altrimenti Chrome nega il microfono senza nemmeno chiedere.
 
 ## 3. Installarla sul telefono
 
-Apri quell'indirizzo con **Chrome su Android** → menu ⋮ → **Installa app** (o *Aggiungi a schermata Home*).
-Da lì parte a schermo intero, con la sua icona, senza barra del browser.
-
+Apri l'indirizzo con **Chrome su Android** → menu ⋮ → **Installa app** (o *Aggiungi a
+schermata Home*). Da lì parte a schermo intero, con la sua icona.
 Al primo **ASCOLTA** Chrome chiede il permesso per il microfono: concedilo.
 
 ---
 
-## Come si usa in sala
+## Collaudo passo passo
 
-1. Prima di salire, in **⚙** scrivi il **contesto del convegno**
-   (tema, platea, di cosa parli tu). Fa una differenza enorme sulla qualità dei punti.
-2. **ASCOLTA** → il pallino diventa rosso e pulsa.
-3. Parli normalmente. Quando ti fermi per qualche secondo, il gobbo analizza da solo
-   l'ultimo pezzo e fa comparire una scheda in cima.
-4. Se vuoi forzarlo subito, **ORA**.
-5. **Copia** su una scheda mette tutto negli appunti.
+### A. Sul PC, prima di pubblicare
+Chrome desktop ha lo stesso riconoscimento vocale di Android, e `localhost` conta come
+sicuro: puoi provare tutto senza deploy.
+
+```bash
+python -m http.server 8099
+```
+poi apri `http://localhost:8099` in Chrome.
+
+1. **⚙ → chiave → Verifica.** Deve dire *Chiave valida: N modelli*. Se dice errore, il
+   problema è la chiave, non l'app. **Salva.**
+2. **✎ → incolla tre righe di un tuo intervento → Analizza.** Entro pochi secondi compare la
+   scheda con i tre blocchi. Questo prova la catena Gemini → schema → rendering, senza microfono.
+3. **ASCOLTA** → Chrome chiede il microfono → parla 15-20 secondi di fila, poi fermati.
+   Dopo la pausa (default 2,5 s) deve analizzare da solo. Se non parte: hai detto meno di
+   ~120 caratteri, oppure *Analizza da solo* è spento.
+4. Parla di nuovo e premi **ORA** senza aspettare la pausa: deve rispondere subito.
+5. **Copia** → incolla in un editor: i tre blocchi in testo semplice.
+6. Cambia modello, riprova il punto 2. Se un modello risponde *non accetta la modalità
+   veloce*, spegni *Modalità veloce* per quel modello.
+
+### B. Sul telefono, dopo la pubblicazione
+1. Apri l'URL in Chrome → **Installa app** → apri dall'icona, non dal browser.
+2. Ripeti i punti 1-4 sopra. Il permesso microfono viene chiesto una sola volta.
+3. **Prova il caso reale:** tienilo in mano o su un leggio, parla come parleresti in sala
+   (volume normale, a 30-50 cm). Guarda se la striscia grigia sotto lo stato segue quello
+   che dici: se sbaglia molte parole, avvicina il telefono o togli il rumore di fondo.
+4. **Prova il limite noto:** blocca lo schermo o passa a un'altra app. L'ascolto si ferma
+   (è il limite della PWA). Riapri: devi ripremere ASCOLTA. *Tieni lo schermo acceso* serve
+   proprio a evitarlo.
+5. **Wifi vs 4G:** in sala il wifi pubblico è spesso saturo. Prova entrambi e tieni il 4G.
+6. **Prova generale:** leggi 3 minuti veri di un tuo intervento senza fermarti. Guarda
+   quante schede produce, se arrivano abbastanza in fretta e se i punti sono usabili.
+   Se sono troppe, alza la *Pausa*; se sono generiche, scrivi meglio il *Contesto*.
+
+### Se qualcosa non va
+| Sintomo | Causa probabile |
+|---|---|
+| *Chiave API non valida* | chiave copiata male, o creata su un progetto senza API abilitata |
+| *Modello non disponibile per questa chiave* | usa **Verifica**: ti mostra quelli che hai davvero |
+| *Quota esaurita (429)* | piano gratuito, troppe richieste al minuto: alza la Pausa o usa solo ORA |
+| *Microfono negato* | Chrome → ⋮ → Impostazioni sito → Microfono → Consenti |
+| la striscia grigia non compare | non sei su HTTPS/localhost, oppure il browser non è Chrome |
+| risposte lente (> 5 s) | *Modalità veloce* spenta, o modello `pro`; passa a un flash |
+
+---
 
 ## Impostazioni
 
 | Voce | Cosa fa |
 |---|---|
-| **Contesto del convegno** | tema, platea, il tuo taglio. Facoltativo ma consigliatissimo |
-| **Modello** | `2.5 Flash` è il compromesso giusto. `Flash-Lite` è più rapido e più superficiale, `Pro` il contrario |
-| **Pausa (sec)** | quanti secondi di silenzio prima che analizzi da solo (default 2,5) |
-| **Modalità veloce** | disattiva il ragionamento esteso: risposte molto più rapide, ideale dal vivo |
-| **Analizza da solo mentre parlo** | se la spegni, funziona solo col pulsante ORA |
-| **Mostra la trascrizione** | stampa sotto ogni scheda il testo che l'ha generata (utile per capire cosa ha capito) |
+| **Contesto del convegno** | tema, platea, il tuo taglio. Facoltativo ma è la leva più forte sulla qualità |
+| **Modello** | `gemini-3.5-flash` è il compromesso giusto. `3.5-flash-lite` più rapido, `3.7-flash` più profondo |
+| **Pausa (sec)** | secondi di silenzio prima che analizzi da solo (default 2,5) |
+| **Modalità veloce** | riduce al minimo il ragionamento del modello: risposte molto più rapide |
+| **Analizza da solo mentre parlo** | se spento, funziona solo col pulsante ORA |
+| **Mostra la trascrizione** | stampa sotto ogni scheda il testo che l'ha generata |
 | **Tieni lo schermo acceso** | wake lock, così il telefono non si spegne mentre parli |
 
 L'analisi automatica scatta solo dopo almeno ~120 caratteri di parlato, per non riempirti
 lo schermo di schede su mezze frasi.
-
----
 
 ## Note oneste
 
@@ -85,14 +119,10 @@ lo schermo di schede su mezze frasi.
   suona strano, non usarlo.
 - **La trascrizione passa da Google.** Il riconoscimento vocale di Chrome manda l'audio ai
   server Google, e il testo va all'API Gemini. Non usarlo su contenuti riservati.
-- **Serve rete.** In una sala con wifi saturo può rallentare: il 4G del telefono di solito è
-  più affidabile.
-- **Deve restare in primo piano.** È il limite della versione PWA: se cambi app o blocchi lo
-  schermo, l'ascolto si ferma. La versione Android nativa risolve questo punto.
-- **Consumo API.** Un intervento lungo può generare parecchie chiamate. Con Flash il costo è
-  minimo, ma se stai sul piano gratuito puoi incontrare il limite di richieste al minuto
-  (l'app te lo dice: *Quota esaurita*). In quel caso alza la **Pausa** o spegni
-  l'analisi automatica e usa **ORA**.
+- **Deve restare in primo piano.** È il limite della versione PWA. La versione Android
+  nativa risolve questo punto.
+- **Consumo API.** Un intervento lungo genera parecchie chiamate. Con un flash il costo è
+  minimo, ma sul piano gratuito puoi incontrare il limite di richieste al minuto.
 
 ## File
 
