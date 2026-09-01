@@ -159,7 +159,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 
 <footer>
   <button id="mic">&#9679; ASCOLTA</button>
-  <button id="now" disabled>ORA</button>
+  <button id="now">ORA</button>
 </footer>
 
 <!-- impostazioni -->
@@ -181,9 +181,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
       placeholder="Es: convegno sull'AI nella sanità, platea di medici e amministratori. Io parlo di responsabilità clinica degli algoritmi."></textarea>
     <div class="hint">Facoltativo ma cambia tutto: più sa dove sei, più i punti sono centrati.</div>
 
-    <div class="two">
-      <div>
-        <label>Modello</label>
+    <label>Modello</label>
         <select id="fModel">
           <option value="gemini-3.5-flash">gemini-3.5-flash (consigliato)</option>
           <option value="gemini-3.5-flash-lite">gemini-3.5-flash-lite (più rapido)</option>
@@ -191,13 +189,20 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
           <option value="gemini-3.6-flash">gemini-3.6-flash</option>
           <option value="gemini-2.5-flash">gemini-2.5-flash (legacy)</option>
         </select>
-      </div>
+    <div class="hint">Flash-Lite = massima velocità. 3.7 Flash = più profondo, un filo più lento. Dal palco conta la velocità.</div>
+
+    <div class="two">
       <div>
         <label>Pausa (sec)</label>
         <input type="number" id="fPause" min="1" max="15" step="0.5">
       </div>
+      <div>
+        <label>Comunque ogni (sec)</label>
+        <input type="number" id="fEvery" min="0" max="300" step="5">
+      </div>
     </div>
-    <div class="hint">Flash-Lite = massima velocità. 3.7 Flash = più profondo, un filo più lento. Dal palco conta la velocità.</div>
+    <div class="hint">Analizza da solo quando ti fermi per «Pausa» secondi. Se non ti fermi mai, manda comunque
+      il pezzo alla prima frase compiuta dopo «Comunque ogni» secondi (0 = mai; minimo 10).</div>
 
     <div class="row"><input type="checkbox" id="fFast"><label for="fFast">Modalità veloce (niente ragionamento esteso)</label></div>
     <div class="row"><input type="checkbox" id="fAuto"><label for="fAuto">Analizza da solo mentre parlo</label></div>
@@ -205,7 +210,8 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
     <div class="row"><input type="checkbox" id="fWake"><label for="fWake">Tieni lo schermo acceso</label></div>
 
     <div class="acts">
-      <button class="btn sec" id="bClear">Svuota storico</button>
+      <button class="btn sec" id="bClear">Svuota</button>
+      <button class="btn sec" id="bExport">Esporta</button>
       <button class="btn pri" id="bSave">Salva</button>
     </div>
   </div>
@@ -226,17 +232,19 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <script>
 /* ============================ stato ============================ */
 var LS = 'gobbo.v1';
-var D = {key:'', ctx:'', model:'gemini-3.5-flash', pause:2.5, fast:true, auto:true, src:false, wake:true, models:[]};
+var D = {key:'', ctx:'', model:'gemini-3.5-flash', pause:2.5, every:30, fast:true, auto:true, src:false, wake:true, models:[]};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
 var rec = null, running = false, wantOn = false;
 var buf = '';        // testo finale non ancora analizzato
-var full = '';       // trascrizione della sessione (contesto)
+var full = loadFull(); // trascrizione della sessione (contesto + export); persiste 12 ore
 var silenceT = null, inflight = false, wakeLock = null;
 var usedPhilos = []; // per non ripetere sempre lo stesso filosofo
 var MIN_AUTO = 120;  // caratteri minimi perche scatti l analisi automatica (un pensiero compiuto)
 var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere quanto aspettare prima di riavviarlo
+var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
+var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
 
 function $(id){ return document.getElementById(id); }
@@ -244,7 +252,18 @@ var out = $('out'), dot = $('dot'), stat = $('status'), live = $('live');
 
 function say(t, err){ stat.textContent = t; stat.classList.toggle('err', !!err); }
 function save(){ localStorage.setItem(LS, JSON.stringify(C)); }
-function saveHist(){ localStorage.setItem(LS + '.hist', JSON.stringify(hist.slice(0, 30))); }
+function saveHist(){ localStorage.setItem(LS + '.hist', JSON.stringify(hist.slice(0, 200))); }
+function saveFull(){
+  if (full.length > 300000) full = full.slice(-300000);
+  try { localStorage.setItem(LS + '.full', JSON.stringify({ t: Date.now(), s: full })); } catch (_) {}
+}
+function loadFull(){
+  try {
+    var o = JSON.parse(localStorage.getItem(LS + '.full') || 'null');
+    if (o && o.s && Date.now() - o.t < 12 * 3600 * 1000) return o.s;
+  } catch (_) {}
+  return '';
+}
 function esc(s){
   return String(s === null || s === undefined ? '' : s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -434,7 +453,7 @@ out.addEventListener('click', function(e){
 function run(testo, contesto){
   if (inflight || !testo.trim()) return;
   if (testo.trim().length < 15) { say('Troppo poco testo per analizzare.'); return; }
-  inflight = true; dot.classList.add('busy'); $('now').disabled = true;
+  inflight = true; dot.classList.add('busy');
   say('Sto pensando...');
 
   ask(testo, contesto).then(function(r){
@@ -452,7 +471,6 @@ function run(testo, contesto){
   }).then(function(){
     inflight = false;
     dot.classList.remove('busy');
-    $('now').disabled = !buf.trim();
   });
 }
 
@@ -468,21 +486,9 @@ function startRec(){
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = function(){ running = true; dot.classList.add('on'); say('In ascolto...'); };
+  rec.onstart = function(){ running = true; dot.classList.add('on'); say('In ascolto… analizzo da solo a ogni pausa; ORA forza subito.'); };
 
-  rec.onresult = function(e){
-    var interim = '';
-    for (var i = e.resultIndex; i < e.results.length; i++) {
-      var tx = e.results[i][0].transcript;
-      if (e.results[i].isFinal) { buf += tx + ' '; full += tx + ' '; }
-      else { interim += tx; }
-    }
-    live.classList.add('show');
-    live.innerHTML = esc(buf.slice(-190)) + '<b>' + esc(interim) + '</b>';
-    live.scrollLeft = live.scrollWidth;   // tiene in vista la coda, cioe le parole appena dette
-    $('now').disabled = inflight || !buf.trim();
-    if (C.auto) armSilence();
-  };
+  rec.onresult = onResult;
 
   rec.onerror = function(e){
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -507,6 +513,34 @@ function startRec(){
   };
 
   try { rec.start(); } catch (_) {}
+}
+
+function onResult(e){
+  var interim = '', gotFinal = false;
+  for (var i = e.resultIndex; i < e.results.length; i++) {
+    var tx = e.results[i][0].transcript;
+    if (e.results[i].isFinal) {
+      buf += tx + ' '; full += tx + ' '; gotFinal = true;
+      if (!chunkStart) chunkStart = Date.now();
+    } else { interim += tx; }
+  }
+  lastInterim = interim;
+  if (gotFinal) saveFull();
+  live.classList.add('show');
+  live.innerHTML = esc(buf.slice(-190)) + '<b>' + esc(interim) + '</b>';
+  live.scrollLeft = live.scrollWidth;   // tiene in vista la coda, cioe le parole appena dette
+  if (!C.auto) return;
+
+  // Due inneschi: (1) una pausa di C.pause secondi; (2) se non ti fermi mai, "comunque ogni"
+  // C.every secondi - ma solo su un risultato finale, cioe a fine frase, per non tagliare a meta.
+  var overdue = C.every > 0 && chunkStart && (Date.now() - chunkStart) >= C.every * 1000;
+  if (gotFinal && overdue && buf.trim().length >= MIN_AUTO && !inflight) {
+    clearTimeout(silenceT);
+    var t = buf.trim();
+    run(t, takeBuffer());
+  } else {
+    armSilence();
+  }
 }
 
 function stopRec(){
@@ -535,7 +569,7 @@ function armSilence(){
    Uso buf.length (non trim) perche full contiene esattamente le stesse aggiunte. */
 function takeBuffer(){
   var ctx = full.slice(0, Math.max(0, full.length - buf.length)).slice(-700);
-  buf = '';
+  buf = ''; chunkStart = 0; lastInterim = '';
   live.innerHTML = '';
   live.classList.remove('show');   // libera spazio: mentre leggi la scheda la striscia sparisce
   return ctx;
@@ -569,8 +603,21 @@ $('mic').addEventListener('click', function(){
 });
 
 $('now').addEventListener('click', function(){
+  if (inflight) { say('Sto già analizzando, un attimo…'); return; }
+  if (lastInterim.trim()) {
+    // Prendo anche le parole provvisorie e riavvio l'ascolto: cosi Chrome non me le
+    // rimanda come finali un secondo dopo, duplicandole.
+    buf += lastInterim + ' '; full += lastInterim + ' '; lastInterim = '';
+    if (running && rec) { try { rec.abort(); } catch (_) {} }
+  }
   var t = buf.trim();
-  if (!t) return;
+  if (!t) {
+    if (!wantOn) say('Premi ASCOLTA e parla, oppure ✎ per scrivere un testo.');
+    else if (full.trim()) say('Niente di nuovo: l’ultimo pezzo è già stato analizzato da solo.');
+    else say('Non ho ancora trascritto nulla: parla e riprova.');
+    return;
+  }
+  if (t.length < 15) { say('Troppo poco: qualche parola in più e ripremi ORA.'); return; }
   clearTimeout(silenceT);
   run(t, takeBuffer());
 });
@@ -582,6 +629,7 @@ function openSet(){
   ensureOption($('fModel'), C.model);
   $('fModel').value = C.model;
   $('fPause').value = C.pause;
+  $('fEvery').value = C.every;
   $('fFast').checked = C.fast;
   $('fAuto').checked = C.auto;
   $('fSrc').checked = C.src;
@@ -597,6 +645,8 @@ $('bSave').addEventListener('click', function(){
   C.ctx = $('fCtx').value;
   C.model = $('fModel').value;
   C.pause = Math.min(15, Math.max(1, parseFloat($('fPause').value) || 2.5));
+  C.every = parseInt($('fEvery').value, 10) || 0;
+  if (C.every > 0 && C.every < 10) C.every = 10;
   C.fast = $('fFast').checked;
   C.auto = $('fAuto').checked;
   C.src  = $('fSrc').checked;
@@ -607,8 +657,47 @@ $('bSave').addEventListener('click', function(){
 });
 
 $('bClear').addEventListener('click', function(){
-  hist = []; usedPhilos = []; saveHist(); render(); say('Storico svuotato.');
+  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0;
+  saveHist(); saveFull(); render(); say('Storico e trascrizione svuotati.');
 });
+
+/* Esporta schede + trascrizione completa in un file di testo (Markdown).
+   Su Android prova prima la condivisione nativa, altrimenti scarica. */
+function exportSession(){
+  if (!hist.length && !full.trim()) { say('Niente da esportare.'); return; }
+  var d = new Date(), pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  var stamp = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + pad(d.getMinutes());
+  var md = '# Gobbo - sessione ' + stamp + '\n\n';
+  if (C.ctx.trim()) md += '_Contesto: ' + C.ctx.trim() + '_\n\n';
+  if (hist.length) {
+    md += '## Schede (dalla piu recente)\n\n';
+    for (var i = 0; i < hist.length; i++) {
+      var h = hist[i]; if (!h || !h.r) continue;
+      md += '### ' + h.t + '\n\n**Punti**\n';
+      for (var k = 0; k < h.r.punti.length; k++) md += '- ' + h.r.punti[k] + '\n';
+      md += '\n**Parafrasi - ' + h.r.filosofo + '**\n' + h.r.parafrasi + '\n\n';
+      md += '**Citazione tua**\n"' + h.r.citazione + '"\n\n';
+      if (h.s) md += '> ' + h.s + '\n\n';
+    }
+  }
+  if (full.trim()) md += '## Trascrizione completa\n\n' + full.trim() + '\n';
+
+  var name = 'gobbo-' + stamp.replace(/[ :]/g, '-') + '.md';
+  var file = new File([md], name, { type: 'text/markdown' });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: name }).catch(function(){ download(md, name); });
+  } else {
+    download(md, name);
+  }
+}
+function download(text, name){
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown;charset=utf-8' }));
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+  say('Esportato: ' + name);
+}
+$('bExport').addEventListener('click', exportSession);
 
 $('bWrite').addEventListener('click', function(){
   $('sWrite').classList.add('open');

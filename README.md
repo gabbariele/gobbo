@@ -65,7 +65,12 @@ poi apri `http://localhost:8099` in Chrome.
 3. **ASCOLTA** → Chrome chiede il microfono → parla 15-20 secondi di fila, poi fermati.
    Dopo la pausa (default 2,5 s) deve analizzare da solo. Se non parte: hai detto meno di
    ~120 caratteri, oppure *Analizza da solo* è spento.
-4. Parla di nuovo e premi **ORA** senza aspettare la pausa: deve rispondere subito.
+   Poi prova a parlare **senza mai fermarti** per un minuto: dopo ~30 s, alla prima frase
+   compiuta, deve analizzare comunque (*Comunque ogni*). L'ascolto non si interrompe: non
+   serve premere FERMA, quello è solo per chiudere la sessione.
+4. Parla di nuovo e premi **ORA** a metà frase, senza aspettare la pausa: manda subito tutto
+   quello che hai detto dall'ultima analisi, parole provvisorie comprese. Se non c'è nulla
+   da mandare (perché l'automatico l'ha già fatto) te lo dice nella riga di stato.
 5. **Copia** → incolla in un editor: i tre blocchi in testo semplice.
 6. Cambia modello, riprova il punto 2. Se un modello risponde *non accetta la modalità
    veloce*, spegni *Modalità veloce* per quel modello.
@@ -103,6 +108,7 @@ poi apri `http://localhost:8099` in Chrome.
 | **Contesto del convegno** | tema, platea, il tuo taglio. Facoltativo ma è la leva più forte sulla qualità |
 | **Modello** | `gemini-3.5-flash` è il compromesso giusto. `3.5-flash-lite` più rapido, `3.7-flash` più profondo |
 | **Pausa (sec)** | secondi di silenzio prima che analizzi da solo (default 2,5) |
+| **Comunque ogni (sec)** | se non ti fermi mai, manda il pezzo alla prima frase compiuta dopo N secondi (default 30; 0 = mai). Evita che il buffer cresca all'infinito mentre parli di fila |
 | **Modalità veloce** | riduce al minimo il ragionamento del modello: risposte molto più rapide |
 | **Analizza da solo mentre parlo** | se spento, funziona solo col pulsante ORA |
 | **Mostra la trascrizione** | stampa sotto ogni scheda il testo che l'ha generata |
@@ -110,6 +116,19 @@ poi apri `http://localhost:8099` in Chrome.
 
 L'analisi automatica scatta solo dopo almeno ~120 caratteri di parlato, per non riempirti
 lo schermo di schede su mezze frasi.
+
+## Cosa viene salvato, e dove
+
+Tutto e solo **sul dispositivo**, nel `localStorage` del browser (per telefono/PC, non
+sincronizzato): la chiave API, le impostazioni, le ultime 200 schede e la trascrizione della
+sessione (tenuta per 12 ore, poi scartata). Nessun server tuo o mio riceve nulla.
+I soli destinatari esterni sono quelli di Google: l'audio per il riconoscimento vocale di
+Chrome e il testo per l'API Gemini.
+
+**⚙ → Esporta** produce un file Markdown con tutte le schede (con il testo che le ha generate)
+e la trascrizione completa: su Android apre la condivisione nativa, sul PC lo scarica.
+**⚙ → Svuota** cancella schede e trascrizione. Disinstallare l'app o cancellare i dati del
+sito cancella anche la chiave.
 
 ## Note oneste
 
