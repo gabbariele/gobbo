@@ -1,0 +1,572 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0a0b0d">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Gobbo</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0a0b0d; --panel:#14161a; --panel2:#1b1e24; --line:#282c34;
+  --text:#f2f3f5; --dim:#8b909a;
+  --amber:#ffb020; --violet:#a78bfa; --green:#34d399; --red:#f87171;
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+  font-size:16px;line-height:1.45;overscroll-behavior:none;
+  display:flex;flex-direction:column;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+
+/* ---------- header ---------- */
+header{
+  flex:0 0 auto;display:flex;align-items:center;gap:10px;
+  padding:calc(var(--safe-t) + 10px) 14px 10px;
+  border-bottom:1px solid var(--line);background:var(--panel);
+}
+.brand{font-weight:800;letter-spacing:.22em;font-size:15px}
+.brand span{color:var(--amber)}
+#dot{width:9px;height:9px;border-radius:50%;background:#444;flex:0 0 auto;transition:.2s}
+#dot.on{background:var(--red);box-shadow:0 0 0 0 rgba(248,113,113,.7);animation:pulse 1.6s infinite}
+#dot.busy{background:var(--amber);animation:none}
+@keyframes pulse{70%{box-shadow:0 0 0 9px rgba(248,113,113,0)}100%{box-shadow:0 0 0 0 rgba(248,113,113,0)}}
+.sp{flex:1}
+.ico{width:40px;height:40px;border-radius:10px;display:grid;place-items:center;font-size:19px;background:var(--panel2)}
+.ico:active{background:#2a2f38}
+
+/* ---------- status + live ---------- */
+#status{
+  flex:0 0 auto;padding:7px 14px;font-size:12.5px;color:var(--dim);
+  background:var(--panel);border-bottom:1px solid var(--line);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#status.err{color:var(--red)}
+#live{
+  flex:0 0 auto;overflow:hidden;padding:7px 14px;
+  font-size:13px;color:var(--dim);border-bottom:1px solid var(--line);
+  display:none;white-space:nowrap;overflow-x:hidden;
+}
+#live.show{display:block}
+#live b{color:var(--text);font-weight:500}
+
+/* ---------- results ---------- */
+main{flex:1 1 auto;overflow-y:auto;padding:12px 12px 8px;-webkit-overflow-scrolling:touch}
+.empty{color:var(--dim);text-align:center;padding:46px 22px;font-size:14.5px;line-height:1.7}
+.empty .big{font-size:44px;display:block;margin-bottom:14px;opacity:.5}
+
+.res{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+  padding:12px;margin-bottom:12px;animation:in .22s ease}
+@keyframes in{from{opacity:0;transform:translateY(8px)}}
+.res.fresh{border-color:#3a4150;box-shadow:0 0 0 1px rgba(255,176,32,.12)}
+.rhead{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim);
+  letter-spacing:.06em;margin-bottom:9px}
+.rhead .sp{flex:1}
+.mini{font-size:11px;color:var(--dim);padding:4px 9px;border:1px solid var(--line);border-radius:8px}
+.mini:active{background:var(--panel2)}
+
+.blk{padding:9px 11px;border-radius:12px;margin-bottom:7px;background:var(--panel2);
+  border-left:3px solid var(--line)}
+.blk:last-of-type{margin-bottom:0}
+.blk h3{margin:0 0 6px;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;font-weight:700}
+.b-p{border-left-color:var(--amber)}  .b-p h3{color:var(--amber)}
+.b-f{border-left-color:var(--violet)} .b-f h3{color:var(--violet)}
+.b-c{border-left-color:var(--green)}  .b-c h3{color:var(--green)}
+.blk ul{margin:0;padding-left:18px}
+.blk li{margin-bottom:7px;font-size:16px;line-height:1.36}
+.blk li:last-child{margin-bottom:0}
+.blk p{margin:0;font-size:16px;line-height:1.42}
+.who{color:var(--violet);font-weight:700}
+.quote{font-style:italic;font-size:17.5px;line-height:1.45}
+.src{margin-top:11px;padding-top:10px;border-top:1px dashed var(--line);
+  font-size:12px;color:#6b7078;display:none}
+.src.show{display:block}
+
+/* ---------- footer ---------- */
+footer{
+  flex:0 0 auto;display:flex;align-items:center;gap:10px;
+  padding:10px 14px calc(var(--safe-b) + 12px);
+  border-top:1px solid var(--line);background:var(--panel);
+}
+#mic{
+  flex:1;height:58px;border-radius:15px;background:var(--amber);color:#151313;
+  font-weight:800;font-size:16.5px;letter-spacing:.08em;display:flex;
+  align-items:center;justify-content:center;gap:9px;transition:.15s
+}
+#mic:active{transform:scale(.98)}
+#mic.on{background:var(--red);color:#fff}
+#now{
+  flex:0 0 auto;height:58px;padding:0 17px;border-radius:15px;
+  background:var(--panel2);border:1px solid var(--line);
+  font-weight:700;font-size:14px;letter-spacing:.05em
+}
+#now:disabled{opacity:.35}
+#now:active{background:#2a2f38}
+
+/* ---------- sheets ---------- */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:50;
+  display:none;align-items:flex-end;backdrop-filter:blur(3px)}
+.sheet.open{display:flex}
+.card{width:100%;max-height:92vh;overflow-y:auto;background:var(--bg);
+  border-top:1px solid var(--line);border-radius:20px 20px 0 0;
+  padding:18px 16px calc(var(--safe-b) + 18px);animation:up .22s ease}
+@keyframes up{from{transform:translateY(30px)}}
+.card h2{margin:0 0 16px;font-size:17px;letter-spacing:.04em}
+label{display:block;font-size:12px;color:var(--dim);margin:14px 0 6px;
+  letter-spacing:.05em;text-transform:uppercase;font-weight:600}
+input[type=text],input[type=password],input[type=number],select,textarea{
+  width:100%;background:var(--panel);border:1px solid var(--line);color:var(--text);
+  border-radius:11px;padding:12px;font:inherit;font-size:15px;outline:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--amber)}
+textarea{min-height:150px;resize:vertical;line-height:1.5}
+.hint{font-size:11.5px;color:#6b7078;margin-top:6px;line-height:1.5}
+.hint a{color:var(--amber)}
+.row{display:flex;gap:10px;align-items:center;margin-top:16px}
+.row label{margin:0;text-transform:none;font-size:14px;color:var(--text);letter-spacing:0}
+input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 auto}
+.acts{display:flex;gap:10px;margin-top:22px}
+.btn{flex:1;height:50px;border-radius:13px;font-weight:700;font-size:15px;
+  display:flex;align-items:center;justify-content:center}
+.btn.pri{background:var(--amber);color:#151313}
+.btn.sec{background:var(--panel);border:1px solid var(--line)}
+.btn:active{opacity:.8}
+.two{display:flex;gap:10px}.two>div{flex:1}
+</style>
+</head>
+<body>
+
+<header>
+  <div id="dot"></div>
+  <div class="brand">GOB<span>BO</span></div>
+  <div class="sp"></div>
+  <button class="ico" id="bWrite" title="Scrivi un testo">&#9998;</button>
+  <button class="ico" id="bSet" title="Impostazioni">&#9881;</button>
+</header>
+
+<div id="status">Premi ASCOLTA per iniziare.</div>
+<div id="live"></div>
+
+<main id="out"></main>
+
+<footer>
+  <button id="mic">&#9679; ASCOLTA</button>
+  <button id="now" disabled>ORA</button>
+</footer>
+
+<!-- impostazioni -->
+<div class="sheet" id="sSet">
+  <div class="card">
+    <h2>Impostazioni</h2>
+
+    <label>Chiave API Gemini</label>
+    <input type="password" id="fKey" placeholder="Incolla qui la chiave" autocomplete="off">
+    <div class="hint">Resta solo su questo telefono (localStorage), non viene mai inviata altrove.
+      Creala gratis su <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a></div>
+
+    <label>Contesto del convegno</label>
+    <textarea id="fCtx" style="min-height:80px"
+      placeholder="Es: convegno sull'AI nella sanità, platea di medici e amministratori. Io parlo di responsabilità clinica degli algoritmi."></textarea>
+    <div class="hint">Facoltativo ma cambia tutto: più sa dove sei, più i punti sono centrati.</div>
+
+    <div class="two">
+      <div>
+        <label>Modello</label>
+        <select id="fModel">
+          <option value="gemini-2.5-flash">2.5 Flash</option>
+          <option value="gemini-2.5-flash-lite">2.5 Flash-Lite</option>
+          <option value="gemini-2.5-pro">2.5 Pro</option>
+        </select>
+      </div>
+      <div>
+        <label>Pausa (sec)</label>
+        <input type="number" id="fPause" min="1" max="15" step="0.5">
+      </div>
+    </div>
+    <div class="hint">Flash-Lite = massima velocità. Pro = più profondo ma più lento.</div>
+
+    <div class="row"><input type="checkbox" id="fFast"><label for="fFast">Modalità veloce (niente ragionamento esteso)</label></div>
+    <div class="row"><input type="checkbox" id="fAuto"><label for="fAuto">Analizza da solo mentre parlo</label></div>
+    <div class="row"><input type="checkbox" id="fSrc"><label for="fSrc">Mostra la trascrizione sotto ogni scheda</label></div>
+    <div class="row"><input type="checkbox" id="fWake"><label for="fWake">Tieni lo schermo acceso</label></div>
+
+    <div class="acts">
+      <button class="btn sec" id="bClear">Svuota storico</button>
+      <button class="btn pri" id="bSave">Salva</button>
+    </div>
+  </div>
+</div>
+
+<!-- scrittura manuale -->
+<div class="sheet" id="sWrite">
+  <div class="card">
+    <h2>Scrivi il testo</h2>
+    <textarea id="fText" placeholder="Incolla o scrivi qui quello che vuoi far analizzare..."></textarea>
+    <div class="acts">
+      <button class="btn sec" id="bCancel">Annulla</button>
+      <button class="btn pri" id="bGo">Analizza</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================ stato ============================ */
+var LS = 'gobbo.v1';
+var D = {key:'', ctx:'', model:'gemini-2.5-flash', pause:2.5, fast:true, auto:true, src:false, wake:true};
+var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
+var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
+
+var rec = null, running = false, wantOn = false;
+var buf = '';        // testo finale non ancora analizzato
+var full = '';       // trascrizione della sessione (contesto)
+var silenceT = null, inflight = false, wakeLock = null;
+var usedPhilos = []; // per non ripetere sempre lo stesso filosofo
+var MIN_AUTO = 120;  // caratteri minimi perche scatti l analisi automatica (un pensiero compiuto)
+
+function $(id){ return document.getElementById(id); }
+var out = $('out'), dot = $('dot'), stat = $('status'), live = $('live');
+
+function say(t, err){ stat.textContent = t; stat.classList.toggle('err', !!err); }
+function save(){ localStorage.setItem(LS, JSON.stringify(C)); }
+function saveHist(){ localStorage.setItem(LS + '.hist', JSON.stringify(hist.slice(0, 30))); }
+function esc(s){
+  return String(s === null || s === undefined ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ============================ prompt ============================ */
+var SYS = [
+'Sei il "gobbo" (suggeritore) di un relatore che sta parlando DAL VIVO a un convegno.',
+'Ricevi la trascrizione automatica di quello che ha appena detto: può contenere errori di riconoscimento vocale, parole tronche, punteggiatura sbagliata. Interpretala con buon senso, ignora il rumore, non commentare gli errori.',
+'',
+'Produci materiale in italiano che il relatore possa leggere con la coda dell’occhio e DIRE AD ALTA VOCE entro pochi secondi.',
+'Regole ferree: frasi brevi e pronunciabili; nessun preambolo; nessun meta-commento tipo "potresti dire"; niente gergo accademico inutile; vai dritto al contenuto.',
+'',
+'1) punti - da 1 a 3 spunti collegati a quanto ha detto. NON riassumono: aggiungono. Ognuno deve spostare il discorso in avanti (una conseguenza non ovvia, un controesempio, un ribaltamento, un’analogia che accende la sala, un ordine di grandezza). Massimo 25 parole ciascuno. Se il materiale è poco, dai un solo punto ma buono.',
+'',
+'2) filosofo + parafrasi - scegli UN filosofo famoso il cui pensiero sia davvero pertinente. Parafrasa quel concetto con parole tue, 1-2 frasi, pronto da dire citando il filosofo per nome. Deve essere FEDELE al pensiero reale di quel filosofo: se non sei sicuro dell’attribuzione, cambia filosofo e scegline uno su cui sei certo. Non inventare mai citazioni letterali.',
+'',
+'3) citazione - un aforisma BREVE e ORIGINALE, massimo 20 parole, scritto da te adesso, che il relatore possa pronunciare come proprio. Non deve appartenere a nessun autore reale né somigliare a una frase celebre esistente. Deve suonare memorabile e asciutto, non uno slogan motivazionale.'
+].join('\n');
+
+var SCHEMA = {
+  type: "object",
+  properties: {
+    punti:     { type: "array", items: { type: "string" } },
+    filosofo:  { type: "string" },
+    parafrasi: { type: "string" },
+    citazione: { type: "string" }
+  },
+  required: ["punti", "filosofo", "parafrasi", "citazione"]
+};
+
+/* ============================ chiamata Gemini ============================ */
+function ask(testo, contesto){
+  if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
+
+  var u = '';
+  if (C.ctx.trim()) u += 'CONTESTO DEL CONVEGNO:\n' + C.ctx.trim() + '\n\n';
+  if (contesto && contesto.trim()) u += 'DETTO POCO FA (solo per contesto, non analizzarlo):\n"""' + contesto.trim() + '"""\n\n';
+  u += 'DA ANALIZZARE - quello che ho appena detto:\n"""' + testo.trim() + '"""';
+  if (usedPhilos.length) u += '\n\nFilosofi già usati poco fa, evitali: ' + usedPhilos.join(', ') + '.';
+
+  var gc = { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 1.0 };
+  if (C.fast && C.model.indexOf('flash') >= 0) gc.thinkingConfig = { thinkingBudget: 0 };
+
+  var ctrl = new AbortController();
+  var to = setTimeout(function(){ ctrl.abort(); }, 30000);
+
+  var url = 'https://generativelanguage.googleapis.com/v1beta/models/' +
+            encodeURIComponent(C.model) + ':generateContent?key=' + encodeURIComponent(C.key);
+
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: ctrl.signal,
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYS }] },
+      contents: [{ role: 'user', parts: [{ text: u }] }],
+      generationConfig: gc
+    })
+  }).catch(function(e){
+    clearTimeout(to);
+    throw new Error(e.name === 'AbortError' ? 'Timeout: la risposta ha superato 30s' : 'Rete non raggiungibile');
+  }).then(function(r){
+    clearTimeout(to);
+    if (r.ok) return r.json();
+    return r.json().catch(function(){ return null; }).then(function(j){
+      var m = (j && j.error && j.error.message) ? j.error.message : (r.status + ' ' + r.statusText);
+      if (r.status === 400 && /API key/i.test(m)) m = 'Chiave API non valida';
+      if (r.status === 404) m = 'Modello "' + C.model + '" non disponibile per questa chiave - provane un altro nelle impostazioni';
+      if (r.status === 429) m = 'Quota esaurita (429). Riprova tra poco.';
+      throw new Error(m);
+    });
+  }).then(function(j){
+    var cand = (j.candidates || [])[0] || {};
+    var parts = (cand.content || {}).parts;
+    if (!parts || !parts[0] || !parts[0].text) {
+      throw new Error('Risposta vuota (' + (cand.finishReason || 'nessun contenuto') + ')');
+    }
+    var o = JSON.parse(parts[0].text);
+    if (!Array.isArray(o.punti)) o.punti = [String(o.punti || '')];
+    o.punti = o.punti.filter(Boolean).slice(0, 3);
+    return o;
+  });
+}
+
+/* ============================ render ============================ */
+var EMPTY = '<div class="empty"><span class="big">&#127908;</span>' +
+  'Parla: ti ascolto, trascrivo e ti rimando<br>' +
+  '<b style="color:var(--amber)">punti</b> &middot; ' +
+  '<b style="color:var(--violet)">filosofia</b> &middot; ' +
+  '<b style="color:var(--green)">citazione</b><br><br>' +
+  'Oppure premi la matita e scrivi tu il testo.</div>';
+
+function render(){
+  if (!hist.length) { out.innerHTML = EMPTY; return; }
+  var html = '';
+  for (var i = 0; i < hist.length; i++) {
+    var h = hist[i];
+    var lis = '';
+    for (var k = 0; k < h.r.punti.length; k++) lis += '<li>' + esc(h.r.punti[k]) + '</li>';
+    html +=
+      '<article class="res' + (i === 0 ? ' fresh' : '') + '">' +
+        '<div class="rhead"><span>' + esc(h.t) + '</span><span class="sp"></span>' +
+          '<button class="mini" data-copy="' + i + '">Copia</button></div>' +
+        '<section class="blk b-p"><h3>Punti</h3><ul>' + lis + '</ul></section>' +
+        '<section class="blk b-f"><h3>Parafrasi &mdash; <span class="who">' + esc(h.r.filosofo) + '</span></h3>' +
+          '<p>' + esc(h.r.parafrasi) + '</p></section>' +
+        '<section class="blk b-c"><h3>Citazione tua</h3>' +
+          '<p class="quote">&ldquo;' + esc(h.r.citazione) + '&rdquo;</p></section>' +
+        '<div class="src' + (C.src ? ' show' : '') + '">' + esc(h.s) + '</div>' +
+      '</article>';
+  }
+  out.innerHTML = html;
+  out.scrollTop = 0;
+}
+
+out.addEventListener('click', function(e){
+  var b = e.target.closest('[data-copy]');
+  if (!b) return;
+  var h = hist[parseInt(b.getAttribute('data-copy'), 10)];
+  if (!h) return;
+  var txt = h.r.punti.map(function(p){ return '- ' + p; }).join('\n') +
+            '\n\n' + h.r.filosofo + ': ' + h.r.parafrasi +
+            '\n\n"' + h.r.citazione + '"';
+  navigator.clipboard.writeText(txt).then(function(){
+    b.textContent = 'Copiato';
+    setTimeout(function(){ b.textContent = 'Copia'; }, 1400);
+  }).catch(function(){ say('Copia non riuscita', true); });
+});
+
+/* ============================ analisi ============================ */
+function run(testo, contesto){
+  if (inflight || !testo.trim()) return;
+  if (testo.trim().length < 15) { say('Troppo poco testo per analizzare.'); return; }
+  inflight = true; dot.classList.add('busy'); $('now').disabled = true;
+  say('Sto pensando...');
+
+  ask(testo, contesto).then(function(r){
+    hist.unshift({
+      t: new Date().toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit', second:'2-digit'}),
+      r: r,
+      s: testo.trim()
+    });
+    if (r.filosofo) { usedPhilos.unshift(r.filosofo); usedPhilos = usedPhilos.slice(0, 4); }
+    saveHist(); render();
+    say(wantOn ? 'In ascolto...' : 'Pronto.');
+    if (navigator.vibrate) navigator.vibrate(35);
+  }).catch(function(e){
+    say(e.message, true);
+  }).then(function(){
+    inflight = false;
+    dot.classList.remove('busy');
+    $('now').disabled = !buf.trim();
+  });
+}
+
+/* ============================ riconoscimento vocale ============================ */
+var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+function startRec(){
+  if (!SR) { say('Questo browser non sa ascoltare. Usa Chrome su Android.', true); return; }
+  if (running) return;
+
+  rec = new SR();
+  rec.lang = 'it-IT';
+  rec.continuous = true;
+  rec.interimResults = true;
+
+  rec.onstart = function(){ running = true; dot.classList.add('on'); say('In ascolto...'); };
+
+  rec.onresult = function(e){
+    var interim = '';
+    for (var i = e.resultIndex; i < e.results.length; i++) {
+      var tx = e.results[i][0].transcript;
+      if (e.results[i].isFinal) { buf += tx + ' '; full += tx + ' '; }
+      else { interim += tx; }
+    }
+    live.classList.add('show');
+    live.innerHTML = esc(buf.slice(-190)) + '<b>' + esc(interim) + '</b>';
+    live.scrollLeft = live.scrollWidth;   // tiene in vista la coda, cioe le parole appena dette
+    $('now').disabled = inflight || !buf.trim();
+    if (C.auto) armSilence();
+  };
+
+  rec.onerror = function(e){
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      say('Microfono negato. Autorizzalo nelle impostazioni del sito.', true);
+      stopRec();
+      return;
+    }
+    if (e.error === 'no-speech' || e.error === 'aborted' || e.error === 'network') return;
+    say('Errore audio: ' + e.error, true);
+  };
+
+  rec.onend = function(){
+    running = false;
+    if (wantOn) {
+      try { rec.start(); running = true; }
+      catch (_) { setTimeout(function(){ if (wantOn) startRec(); }, 350); }
+    } else {
+      dot.classList.remove('on');
+    }
+  };
+
+  try { rec.start(); } catch (_) {}
+}
+
+function stopRec(){
+  wantOn = false; running = false;
+  dot.classList.remove('on');
+  if (rec) { try { rec.onend = null; rec.stop(); } catch (_) {} }
+  $('mic').classList.remove('on');
+  $('mic').innerHTML = '&#9679; ASCOLTA';
+  clearTimeout(silenceT);
+  releaseWake();
+}
+
+function armSilence(){
+  clearTimeout(silenceT);
+  silenceT = setTimeout(function(){
+    var t = buf.trim();
+    if (t.length < MIN_AUTO) return;
+    // una richiesta e gia in volo: riprovo fra poco invece di perdere il pezzo
+    if (inflight) { armSilence(); return; }
+    var ctx = takeBuffer();
+    run(t, ctx);
+  }, Math.max(1000, C.pause * 1000));
+}
+
+/* Svuota il buffer e restituisce il testo detto PRIMA di esso, come contesto.
+   Uso buf.length (non trim) perche full contiene esattamente le stesse aggiunte. */
+function takeBuffer(){
+  var ctx = full.slice(0, Math.max(0, full.length - buf.length)).slice(-700);
+  buf = '';
+  live.innerHTML = '';
+  live.classList.remove('show');   // libera spazio: mentre leggi la scheda la striscia sparisce
+  return ctx;
+}
+
+/* ============================ wake lock ============================ */
+function reqWake(){
+  if (!C.wake || !('wakeLock' in navigator)) return;
+  navigator.wakeLock.request('screen').then(function(w){ wakeLock = w; }).catch(function(){});
+}
+function releaseWake(){
+  if (wakeLock) { try { wakeLock.release(); } catch (_) {} wakeLock = null; }
+}
+document.addEventListener('visibilitychange', function(){
+  if (document.visibilityState === 'visible' && wantOn) reqWake();
+});
+
+/* ============================ UI ============================ */
+$('mic').addEventListener('click', function(){
+  if (wantOn) {
+    stopRec();
+    say('Fermato. ' + (buf.trim() ? 'Premi ORA per analizzare l’ultimo pezzo.' : ''));
+  } else {
+    if (!C.key) { openSet(); say('Prima incolla la chiave API Gemini.', true); return; }
+    wantOn = true;
+    $('mic').classList.add('on');
+    $('mic').innerHTML = '&#9632; FERMA';
+    reqWake();
+    startRec();
+  }
+});
+
+$('now').addEventListener('click', function(){
+  var t = buf.trim();
+  if (!t) return;
+  clearTimeout(silenceT);
+  run(t, takeBuffer());
+});
+
+function openSet(){
+  $('fKey').value = C.key;
+  $('fCtx').value = C.ctx;
+  $('fModel').value = C.model;
+  $('fPause').value = C.pause;
+  $('fFast').checked = C.fast;
+  $('fAuto').checked = C.auto;
+  $('fSrc').checked = C.src;
+  $('fWake').checked = C.wake;
+  $('sSet').classList.add('open');
+}
+
+$('bSet').addEventListener('click', openSet);
+
+$('bSave').addEventListener('click', function(){
+  C.key = $('fKey').value.trim();
+  C.ctx = $('fCtx').value;
+  C.model = $('fModel').value;
+  C.pause = Math.min(15, Math.max(1, parseFloat($('fPause').value) || 2.5));
+  C.fast = $('fFast').checked;
+  C.auto = $('fAuto').checked;
+  C.src  = $('fSrc').checked;
+  C.wake = $('fWake').checked;
+  save(); render();
+  $('sSet').classList.remove('open');
+  say(wantOn ? 'In ascolto...' : 'Salvato. Pronto.');
+});
+
+$('bClear').addEventListener('click', function(){
+  hist = []; usedPhilos = []; saveHist(); render(); say('Storico svuotato.');
+});
+
+$('bWrite').addEventListener('click', function(){
+  $('sWrite').classList.add('open');
+  setTimeout(function(){ $('fText').focus(); }, 120);
+});
+$('bCancel').addEventListener('click', function(){ $('sWrite').classList.remove('open'); });
+$('bGo').addEventListener('click', function(){
+  var t = $('fText').value.trim();
+  if (!t) { say('Scrivi qualcosa prima.', true); return; }
+  $('sWrite').classList.remove('open');
+  $('fText').value = '';
+  run(t, '');
+});
+
+var sheets = document.querySelectorAll('.sheet');
+for (var si = 0; si < sheets.length; si++) {
+  sheets[si].addEventListener('click', function(e){
+    if (e.target === this) this.classList.remove('open');
+  });
+}
+
+/* ============================ avvio ============================ */
+render();
+if (!SR) say('Riconoscimento vocale non disponibile: usa Chrome su Android. La modalità scrivi funziona comunque.', true);
+else if (!C.key) say('Apri le impostazioni e incolla la chiave API Gemini per iniziare.');
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
+</script>
+</body>
+</html>
