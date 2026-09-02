@@ -191,6 +191,17 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
         </select>
     <div class="hint">Flash-Lite = massima velocità. 3.7 Flash = più profondo, un filo più lento. Dal palco conta la velocità.</div>
 
+    <label>Modello di riserva</label>
+        <select id="fFallback">
+          <option value="">(nessuno)</option>
+          <option value="gemini-3.7-flash">gemini-3.7-flash (consigliato)</option>
+          <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+          <option value="gemini-2.5-flash">gemini-2.5-flash</option>
+        </select>
+    <div class="hint">Se il principale è sovraccarico (503), in coda (429) o non risponde entro 12 secondi,
+      la richiesta passa subito a questo. La scheda indica da quale modello arriva.</div>
+
     <div class="two">
       <div>
         <label>Pausa (sec)</label>
@@ -232,7 +243,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <script>
 /* ============================ stato ============================ */
 var LS = 'gobbo.v1';
-var D = {key:'', ctx:'', model:'gemini-3.5-flash', pause:2.5, every:30, fast:true, auto:true, src:false, wake:true, models:[]};
+var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash', pause:2.5, every:30, fast:true, auto:true, src:false, wake:true, models:[]};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
@@ -317,22 +328,47 @@ var SCHEMA = {
 };
 
 /* ============================ chiamata Gemini ============================ */
-function ask(testo, contesto){
-  if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
-
+function buildPrompt(testo, contesto){
   var u = '';
   if (C.ctx.trim()) u += 'CONTESTO DEL CONVEGNO:\n' + C.ctx.trim() + '\n\n';
   if (contesto && contesto.trim()) u += 'DETTO POCO FA (solo per contesto, non analizzarlo):\n"""' + contesto.trim() + '"""\n\n';
   u += 'DA ANALIZZARE - quello che ho appena detto:\n"""' + testo.trim() + '"""';
   if (usedPhilos.length) u += '\n\nFilosofi già usati poco fa, evitali: ' + usedPhilos.join(', ') + '.';
+  return u;
+}
 
+/* Errori per cui ha senso passare alla riserva: il modello e' sovraccarico o in coda,
+   il servizio e' giu', oppure non risponde in tempo. Non per chiave sbagliata o richiesta malformata. */
+function isOverload(e){
+  return !!e && (e.timeout || e.status === 503 || e.status === 429 || e.status === 500 || e.status === 502 || e.status === 504
+    || /overload|high demand|unavailable|exhausted|try again|deadline/i.test(e.message || ''));
+}
+
+function ask(testo, contesto){
+  if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
+  var u = buildPrompt(testo, contesto);
+  var fb = (C.fallback && C.fallback !== C.model) ? C.fallback : '';
+  // con una riserva pronta non aspetto 30 s il principale: dal palco 12 s sono gia' troppi
+  return askModel(C.model, u, fb ? 12000 : 30000).then(function(o){
+    o.model = C.model; return o;
+  }, function(e){
+    if (!fb || !isOverload(e)) throw e;
+    say(C.model + ': ' + e.message + '. Passo a ' + fb + '…');
+    return askModel(fb, u, 30000).then(function(o){
+      o.model = fb; o.fallback = true; return o;
+    }, function(e2){
+      throw new Error(C.model + ': ' + e.message + ' — anche ' + fb + ': ' + e2.message);
+    });
+  });
+}
+
+function askModel(model, u, timeoutMs){
   var gc = { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 1.0 };
-  if (C.fast) { var tc = fastThinking(C.model); if (tc) gc.thinkingConfig = tc; }
+  if (C.fast) { var tc = fastThinking(model); if (tc) gc.thinkingConfig = tc; }
 
   var ctrl = new AbortController();
-  var to = setTimeout(function(){ ctrl.abort(); }, 30000);
-
-  var url = API + 'models/' + encodeURIComponent(C.model) + ':generateContent';
+  var to = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
+  var url = API + 'models/' + encodeURIComponent(model) + ':generateContent';
 
   return fetch(url, {
     method: 'POST',
@@ -345,7 +381,9 @@ function ask(testo, contesto){
     })
   }).catch(function(e){
     clearTimeout(to);
-    throw new Error(e.name === 'AbortError' ? 'Timeout: la risposta ha superato 30s' : 'Rete non raggiungibile');
+    var err = new Error(e.name === 'AbortError' ? 'nessuna risposta entro ' + Math.round(timeoutMs / 1000) + ' s' : 'Rete non raggiungibile');
+    err.timeout = (e.name === 'AbortError');
+    throw err;
   }).then(function(r){
     clearTimeout(to);
     if (r.ok) return r.json();
@@ -353,9 +391,11 @@ function ask(testo, contesto){
       var m = (j && j.error && j.error.message) ? j.error.message : (r.status + ' ' + r.statusText);
       if (r.status === 400 && /API key/i.test(m)) m = 'Chiave API non valida';
       else if (r.status === 400 && /thinking/i.test(m)) m = 'Questo modello non accetta la modalità veloce: spegnila nelle impostazioni o cambia modello';
-      if (r.status === 404) m = 'Modello "' + C.model + '" non disponibile per questa chiave - provane un altro nelle impostazioni';
-      if (r.status === 429) m = 'Quota esaurita (429). Riprova tra poco.';
-      throw new Error(m);
+      if (r.status === 404) m = 'Modello "' + model + '" non disponibile per questa chiave - usa Verifica nelle impostazioni';
+      if (r.status === 429) m = 'troppe richieste (429)';
+      if (r.status === 503) m = 'sovraccarico (503)';
+      var err = new Error(m); err.status = r.status;
+      throw err;
     });
   }).then(function(j){
     var cand = (j.candidates || [])[0] || {};
@@ -405,13 +445,18 @@ function checkKey(){
 }
 
 function fillModels(ids){
-  var sel = $('fModel'), cur = sel.value;
   ids = ids.slice().sort(function(a, b){
     var fa = /flash/.test(a), fb = /flash/.test(b);
     if (fa !== fb) return fa ? -1 : 1;                    // i flash in cima: sono quelli da palco
     return b.localeCompare(a, undefined, { numeric: true }); // versione piu alta prima
   });
+  fillSelect($('fModel'), ids, false);
+  fillSelect($('fFallback'), ids, true);
+}
+function fillSelect(sel, ids, withNone){
+  var cur = sel.value;
   sel.innerHTML = '';
+  if (withNone) { var z = document.createElement('option'); z.value = ''; z.textContent = '(nessuno)'; sel.appendChild(z); }
   for (var i = 0; i < ids.length; i++) {
     var o = document.createElement('option'); o.value = ids[i]; o.textContent = ids[i]; sel.appendChild(o);
   }
@@ -442,7 +487,9 @@ function render(){
     for (var k = 0; k < h.r.punti.length; k++) lis += '<li>' + esc(h.r.punti[k]) + '</li>';
     html +=
       '<article class="res' + (i === 0 ? ' fresh' : '') + '">' +
-        '<div class="rhead"><span>' + esc(h.t) + '</span><span class="sp"></span>' +
+        '<div class="rhead"><span>' + esc(h.t) + '</span>' +
+          (h.m ? '<span title="modello">' + (h.fb ? '&#8635; ' : '') + esc(h.m.replace(/^gemini-/, '')) + '</span>' : '') +
+          '<span class="sp"></span>' +
           '<button class="mini" data-copy="' + i + '">Copia</button></div>' +
         '<section class="blk b-p"><h3>Punti</h3><ul>' + lis + '</ul></section>' +
         '<section class="blk b-f"><h3>Parafrasi &mdash; <span class="who">' + esc(h.r.filosofo) + '</span></h3>' +
@@ -481,11 +528,13 @@ function run(testo, contesto){
     hist.unshift({
       t: new Date().toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit', second:'2-digit'}),
       r: r,
-      s: testo.trim()
+      s: testo.trim(),
+      m: r.model || C.model,
+      fb: !!r.fallback
     });
     if (r.filosofo) { usedPhilos.unshift(r.filosofo); usedPhilos = usedPhilos.slice(0, 4); }
     saveHist(); render();
-    say(wantOn ? 'In ascolto...' : 'Pronto.');
+    say((wantOn ? 'In ascolto…' : 'Pronto.') + (r.fallback ? ' Risposta dalla riserva (' + r.model + ').' : ''));
     if (navigator.vibrate) navigator.vibrate(35);
   }).catch(function(e){
     say(e.message, true);
@@ -693,6 +742,8 @@ function openSet(){
   if (C.models && C.models.length) fillModels(C.models);
   ensureOption($('fModel'), C.model);
   $('fModel').value = C.model;
+  ensureOption($('fFallback'), C.fallback);
+  $('fFallback').value = C.fallback || '';
   $('fPause').value = C.pause;
   $('fEvery').value = C.every;
   $('fFast').checked = C.fast;
@@ -709,6 +760,7 @@ $('bSave').addEventListener('click', function(){
   C.key = $('fKey').value.trim();
   C.ctx = $('fCtx').value;
   C.model = $('fModel').value;
+  C.fallback = $('fFallback').value;
   C.pause = Math.min(15, Math.max(1, parseFloat($('fPause').value) || 2.5));
   C.every = parseInt($('fEvery').value, 10) || 0;
   if (C.every > 0 && C.every < 10) C.every = 10;
