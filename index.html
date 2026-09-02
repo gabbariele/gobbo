@@ -244,8 +244,22 @@ var full = loadFull();   // trascrizione gia' analizzata (contesto + export); pe
    produce "Talete / Talete mercante / Talete mercante prima...". Percio' tengo il testo PER
    INDICE e lo sovrascrivo: ogni segmento entra una volta sola, nella sua versione finale. */
 var gen = 0;             // numero dell'istanza di riconoscimento (gli indici ripartono a ogni riavvio)
-var segs = {};           // segs[gen][indice] = testo finale del segmento, non ancora analizzato
-var seenLen = 0, doneIdx = 0; // indici visti / gia' analizzati per l'istanza corrente
+var segs = {};           // segs[gen][indice] = { text, sent, off }: testo del segmento, se gia' analizzato,
+                         //   e da quale carattere parte la parte nuova (se allungato dopo l'analisi)
+var seenLen = 0;         // indici visti nell'istanza corrente (serve a ORA per accodare il provvisorio)
+
+/* Su Android la frase successiva a una pausa RIUSA l'indice 0. Quindi non posso decidere
+   dagli indici cosa e' gia' stato analizzato: decido dal testo. Stesso indice e testo che
+   prolunga o corregge il precedente = revisione dello stesso segmento; testo diverso = frase nuova. */
+function commonPrefix(a, b){
+  var n = 0, m = Math.min(a.length, b.length);
+  while (n < m && a.charAt(n) === b.charAt(n)) n++;
+  return n;
+}
+function isRevision(a, b){
+  var n = commonPrefix(a, b);
+  return n >= 3 && n >= Math.min(a.length, b.length) * 0.6;
+}
 var silenceT = null, inflight = false, wakeLock = null;
 var usedPhilos = []; // per non ripetere sempre lo stesso filosofo
 var MIN_AUTO = 120;  // caratteri minimi perche scatti l analisi automatica (un pensiero compiuto)
@@ -488,7 +502,7 @@ function startRec(){
   if (!SR) { say('Questo browser non sa ascoltare. Usa Chrome su Android.', true); return; }
   if (running) return;
 
-  rec = new SR(); gen++; seenLen = 0; doneIdx = 0;
+  rec = new SR(); gen++; seenLen = 0;
   rec.lang = 'it-IT';
   rec.continuous = true;
   rec.interimResults = true;
@@ -529,11 +543,27 @@ function onResult(e){
   for (var i = 0; i < n; i++) {
     var r = e.results[i], tx = (r[0] && r[0].transcript) || '';
     if (r.isFinal) {
-      if (i < doneIdx) continue;                 // segmento gia' analizzato: ignoro le sue riedizioni
-      if (cur[i] !== tx) {
-        cur[i] = tx; gotFinal = true;
-        if (!chunkStart) chunkStart = Date.now();
+      var seg = cur[i], changed = false;
+      if (!seg) {
+        cur[i] = { text: tx, sent: false, off: 0 }; changed = true;
+      } else if (seg.text === tx) {
+        // riedizione identica: niente da fare
+      } else if (isRevision(seg.text, tx)) {
+        if (seg.sent) {
+          // gia' analizzato ma Chrome lo allunga/corregge ancora: tengo solo la parte nuova,
+          // dall'inizio della parola in cui divergono
+          var k = commonPrefix(seg.text, tx);
+          if (tx.charAt(k) !== ' ') while (k > 0 && tx.charAt(k - 1) !== ' ') k--;
+          cur[i] = { text: tx, sent: false, off: k };
+        } else {
+          seg.text = tx;
+        }
+        changed = true;
+      } else {
+        // testo diverso allo stesso indice: frase nuova (Android riparte da 0 dopo una pausa)
+        cur[i] = { text: tx, sent: false, off: 0 }; changed = true;
       }
+      if (changed) { gotFinal = true; if (!chunkStart) chunkStart = Date.now(); }
     } else {
       // le ipotesi provvisorie su Android sono cumulative: se la nuova contiene la precedente, sostituisco
       interim = (interim && tx.indexOf(interim) === 0) ? tx : interim + tx;
@@ -585,7 +615,10 @@ function joinSegs(){
   var out = [], gens = Object.keys(segs).map(Number).sort(function(a, b){ return a - b; });
   for (var g = 0; g < gens.length; g++) {
     var arr = segs[gens[g]];
-    for (var i = 0; i < arr.length; i++) if (arr[i] && arr[i].trim()) out.push(arr[i].trim());
+    for (var i = 0; i < arr.length; i++) {
+      var sg = arr[i]; if (!sg || sg.sent) continue;
+      var t = sg.text.slice(sg.off).trim(); if (t) out.push(t);
+    }
   }
   return out.length ? out.join(' ') + ' ' : '';
 }
@@ -594,7 +627,12 @@ function joinSegs(){
 function takeBuffer(){
   var ctx = full.slice(-700);
   if (buf.trim()) { full += buf.trim() + ' '; saveFull(); }
-  segs = {}; doneIdx = seenLen;              // le riedizioni dei segmenti gia' visti vanno ignorate
+  // segno come analizzati i segmenti dell'istanza corrente (li tengo per riconoscerne le
+  // riedizioni); quelli di istanze morte non torneranno piu': via
+  for (var g in segs) {
+    if (Number(g) !== gen) { delete segs[g]; continue; }
+    var arr = segs[g]; for (var i = 0; i < arr.length; i++) if (arr[i]) arr[i].sent = true;
+  }
   buf = ''; chunkStart = 0; lastInterim = '';
   live.innerHTML = '';
   live.classList.remove('show');   // libera spazio: mentre leggi la scheda la striscia sparisce
@@ -633,7 +671,7 @@ $('now').addEventListener('click', function(){
   if (lastInterim.trim()) {
     // Prendo anche le parole provvisorie (come segmento in coda) e riavvio l'ascolto:
     // cosi Chrome non me le rimanda come finali un secondo dopo, duplicandole.
-    (segs[gen] || (segs[gen] = []))[seenLen] = lastInterim.trim(); seenLen++;
+    (segs[gen] || (segs[gen] = []))[seenLen] = { text: lastInterim.trim(), sent: false, off: 0 }; seenLen++;
     buf = joinSegs(); lastInterim = '';
     if (running && rec) { try { rec.abort(); } catch (_) {} }
   }
@@ -684,7 +722,7 @@ $('bSave').addEventListener('click', function(){
 });
 
 $('bClear').addEventListener('click', function(){
-  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; segs = {}; doneIdx = seenLen;
+  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; segs = {};
   saveHist(); saveFull(); render(); say('Storico e trascrizione svuotati.');
 });
 
