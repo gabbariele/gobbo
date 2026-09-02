@@ -94,7 +94,7 @@ poi apri `http://localhost:8099` in Chrome.
 |---|---|
 | *Chiave API non valida* | chiave copiata male, o creata su un progetto senza API abilitata |
 | *Modello non disponibile per questa chiave* | usa **Verifica**: ti mostra quelli che hai davvero |
-| *sovraccarico (503)* / *troppe richieste (429)* | Google è in affanno o sei oltre il limite del piano: interviene la **riserva**. Se anche quella fallisce, alza la Pausa o usa solo ORA |
+| *sovraccarico (503)* / *troppe richieste (429)* | Google è in affanno o sei oltre il limite del piano: ritenta alternando principale e **riserva** finché dura il budget, e intanto ti dice cosa fa. Se vedi spesso *Niente risposta entro N s*, alza il budget o la Pausa |
 | *Microfono negato* | Chrome → ⋮ → Impostazioni sito → Microfono → Consenti |
 | la striscia grigia non compare | non sei su HTTPS/localhost, oppure il browser non è Chrome |
 | risposte lente (> 5 s) | *Modalità veloce* spenta, o modello `pro`; passa a un flash |
@@ -108,6 +108,7 @@ poi apri `http://localhost:8099` in Chrome.
 | **Contesto del convegno** | tema, platea, il tuo taglio. Facoltativo ma è la leva più forte sulla qualità |
 | **Modello** | `gemini-3.5-flash` è il compromesso giusto. `3.5-flash-lite` più rapido, `3.7-flash` più profondo |
 | **Modello di riserva** | se il principale è sovraccarico (503), in coda (429) o muto per 12 s, la richiesta passa subito a questo. Default `gemini-3.7-flash`. La scheda mostra ↻ e il nome quando è intervenuto |
+| **Tempo massimo per una risposta** | budget in secondi (default 20) entro cui alterna principale e riserva con attese crescenti se Gemini è sovraccarico. Scaduto, rinuncia a quel pezzo. Fino a due richieste in volo insieme: una lenta non blocca le altre |
 | **Pausa (sec)** | secondi di silenzio prima che analizzi da solo (default 2,5) |
 | **Comunque ogni (sec)** | se non ti fermi mai, manda il pezzo alla prima frase compiuta dopo N secondi (default 30; 0 = mai). Evita che il buffer cresca all'infinito mentre parli di fila |
 | **Modalità veloce** | riduce al minimo il ragionamento del modello: risposte molto più rapide |

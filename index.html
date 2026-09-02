@@ -215,6 +215,11 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
     <div class="hint">Analizza da solo quando ti fermi per «Pausa» secondi. Se non ti fermi mai, manda comunque
       il pezzo alla prima frase compiuta dopo «Comunque ogni» secondi (0 = mai; minimo 10).</div>
 
+    <label>Tempo massimo per una risposta (sec)</label>
+    <input type="number" id="fBudget" min="5" max="120" step="5">
+    <div class="hint">Se Gemini è sovraccarico, entro questo tempo alterna principale e riserva con attese crescenti.
+      Scaduto, rinuncia a quel pezzo e va avanti: perdi una scheda, non la sessione. Intanto altre richieste partono lo stesso.</div>
+
     <div class="row"><input type="checkbox" id="fFast"><label for="fFast">Modalità veloce (niente ragionamento esteso)</label></div>
     <div class="row"><input type="checkbox" id="fAuto"><label for="fAuto">Analizza da solo mentre parlo</label></div>
     <div class="row"><input type="checkbox" id="fSrc"><label for="fSrc">Mostra la trascrizione sotto ogni scheda</label></div>
@@ -243,7 +248,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <script>
 /* ============================ stato ============================ */
 var LS = 'gobbo.v1';
-var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash', pause:2.5, every:30, fast:true, auto:true, src:false, wake:true, models:[]};
+var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash', pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[]};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
@@ -271,7 +276,8 @@ function isRevision(a, b){
   var n = commonPrefix(a, b);
   return n >= 3 && n >= Math.min(a.length, b.length) * 0.6;
 }
-var silenceT = null, inflight = false, wakeLock = null;
+var silenceT = null, wakeLock = null;
+var inflight = 0, MAX_INFLIGHT = 2;  // richieste in volo: nessuna blocca le altre, ma non piu' di due insieme
 var usedPhilos = []; // per non ripetere sempre lo stesso filosofo
 var MIN_AUTO = 120;  // caratteri minimi perche scatti l analisi automatica (un pensiero compiuto)
 var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere quanto aspettare prima di riavviarlo
@@ -340,26 +346,52 @@ function buildPrompt(testo, contesto){
 /* Errori per cui ha senso passare alla riserva: il modello e' sovraccarico o in coda,
    il servizio e' giu', oppure non risponde in tempo. Non per chiave sbagliata o richiesta malformata. */
 function isOverload(e){
-  return !!e && (e.timeout || e.status === 503 || e.status === 429 || e.status === 500 || e.status === 502 || e.status === 504
+  return !!e && (e.timeout || e.status === 408 || e.status === 429 || e.status === 500 || e.status === 502 || e.status === 503 || e.status === 504
     || /overload|high demand|unavailable|exhausted|try again|deadline/i.test(e.message || ''));
 }
 
+function short(m){ return String(m).replace(/^gemini-/, ''); }
+function fmtS(ms){ return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; }
+
+/* Regole (le stesse di un'app dal vivo che non si pianta):
+   - ritento solo gli errori temporanei (429, 5xx, timeout), mai chiave errata o richiesta malformata;
+   - budget in SECONDI, non in tentativi: scaduto, rinuncio a questo pezzo e la vita continua;
+   - attesa crescente con tetto e fattore casuale 0,7-1,3, alternando principale e riserva;
+   - Retry-After ha la precedenza; se chiede piu' del budget residuo, mi arrendo subito. */
 function ask(testo, contesto){
   if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
   var u = buildPrompt(testo, contesto);
-  var fb = (C.fallback && C.fallback !== C.model) ? C.fallback : '';
-  // con una riserva pronta non aspetto 30 s il principale: dal palco 12 s sono gia' troppi
-  return askModel(C.model, u, fb ? 12000 : 30000).then(function(o){
-    o.model = C.model; return o;
-  }, function(e){
-    if (!fb || !isOverload(e)) throw e;
-    say(C.model + ': ' + e.message + '. Passo a ' + fb + '…');
-    return askModel(fb, u, 30000).then(function(o){
-      o.model = fb; o.fallback = true; return o;
-    }, function(e2){
-      throw new Error(C.model + ': ' + e.message + ' — anche ' + fb + ': ' + e2.message);
+  var models = [C.model];
+  if (C.fallback && C.fallback !== C.model) models.push(C.fallback);
+  var budgetMs = Math.max(5, C.budget || 20) * 1000, t0 = Date.now(), attempt = 0, errs = [];
+  function remaining(){ return budgetMs - (Date.now() - t0); }
+  function giveUp(extra){
+    return new Error('Niente risposta entro ' + Math.round(budgetMs / 1000) + ' s' + (extra || '') +
+                     (errs.length ? ' (' + errs.join('; ') + ')' : ''));
+  }
+  function tryOnce(){
+    var model = models[attempt % models.length];
+    var rem = remaining();
+    if (rem < 1500) return Promise.reject(giveUp());
+    var perTry = Math.min(attempt === 0 ? 10000 : 12000, rem);
+    return askModel(model, u, perTry).then(function(o){
+      o.model = model; o.fallback = attempt > 0; o.attempts = attempt + 1;
+      return o;
+    }, function(e){
+      if (!isOverload(e)) throw e;                       // non temporaneo: fuori subito, insistere non aiuta
+      errs.push(short(model) + ': ' + e.message);
+      attempt++;
+      var wait;
+      if (e.retryAfter != null) wait = e.retryAfter * 1000;           // il provider sa meglio di me
+      else if (e.timeout) wait = 0;                                     // ho gia' aspettato abbastanza
+      else wait = Math.min(4000, 700 * Math.pow(1.8, attempt - 1)) * (0.7 + Math.random() * 0.6);
+      if (wait > remaining() - 1500) throw giveUp(e.retryAfter != null ? ': Gemini chiede di attendere ' + fmtS(wait) : '');
+      var next = models[attempt % models.length];
+      say(short(model) + ' ' + e.message + ': riprovo con ' + short(next) + (wait >= 300 ? ' fra ' + fmtS(wait) : '') + '…');
+      return new Promise(function(r){ setTimeout(r, wait); }).then(tryOnce);
     });
-  });
+  }
+  return tryOnce();
 }
 
 function askModel(model, u, timeoutMs){
@@ -395,6 +427,9 @@ function askModel(model, u, timeoutMs){
       if (r.status === 429) m = 'troppe richieste (429)';
       if (r.status === 503) m = 'sovraccarico (503)';
       var err = new Error(m); err.status = r.status;
+      var ra = parseFloat(r.headers && r.headers.get ? r.headers.get('Retry-After') : '');
+      if (isNaN(ra)) { var mm = /retry in ([\d.]+)\s*s/i.exec((j && j.error && j.error.message) || ''); if (mm) ra = parseFloat(mm[1]); }
+      if (!isNaN(ra)) err.retryAfter = ra;
       throw err;
     });
   }).then(function(j){
@@ -519,10 +554,10 @@ out.addEventListener('click', function(e){
 
 /* ============================ analisi ============================ */
 function run(testo, contesto){
-  if (inflight || !testo.trim()) return;
+  if (inflight >= MAX_INFLIGHT || !testo.trim()) return;
   if (testo.trim().length < 15) { say('Troppo poco testo per analizzare.'); return; }
-  inflight = true; dot.classList.add('busy');
-  say('Sto pensando...');
+  inflight++; dot.classList.add('busy');
+  say('Sto pensando…');
 
   ask(testo, contesto).then(function(r){
     hist.unshift({
@@ -534,13 +569,13 @@ function run(testo, contesto){
     });
     if (r.filosofo) { usedPhilos.unshift(r.filosofo); usedPhilos = usedPhilos.slice(0, 4); }
     saveHist(); render();
-    say((wantOn ? 'In ascolto…' : 'Pronto.') + (r.fallback ? ' Risposta dalla riserva (' + r.model + ').' : ''));
+    say((wantOn ? 'In ascolto…' : 'Pronto.') + (r.fallback ? ' Risposta da ' + short(r.model) + ' al tentativo ' + r.attempts + '.' : ''));
     if (navigator.vibrate) navigator.vibrate(35);
   }).catch(function(e){
     say(e.message, true);
   }).then(function(){
-    inflight = false;
-    dot.classList.remove('busy');
+    inflight--;
+    if (inflight <= 0) { inflight = 0; dot.classList.remove('busy'); }
   });
 }
 
@@ -628,7 +663,7 @@ function onResult(e){
   // Due inneschi: (1) una pausa di C.pause secondi; (2) se non ti fermi mai, "comunque ogni"
   // C.every secondi - ma solo su un risultato finale, cioe a fine frase, per non tagliare a meta.
   var overdue = C.every > 0 && chunkStart && (Date.now() - chunkStart) >= C.every * 1000;
-  if (gotFinal && overdue && buf.trim().length >= MIN_AUTO && !inflight) {
+  if (gotFinal && overdue && buf.trim().length >= MIN_AUTO && inflight < MAX_INFLIGHT) {
     clearTimeout(silenceT);
     var t = buf.trim();
     run(t, takeBuffer());
@@ -653,7 +688,7 @@ function armSilence(){
     var t = buf.trim();
     if (t.length < MIN_AUTO) return;
     // una richiesta e gia in volo: riprovo fra poco invece di perdere il pezzo
-    if (inflight) { armSilence(); return; }
+    if (inflight >= MAX_INFLIGHT) { armSilence(); return; }
     var ctx = takeBuffer();
     run(t, ctx);
   }, Math.max(1000, C.pause * 1000));
@@ -716,7 +751,7 @@ $('mic').addEventListener('click', function(){
 });
 
 $('now').addEventListener('click', function(){
-  if (inflight) { say('Sto già analizzando, un attimo…'); return; }
+  if (inflight >= MAX_INFLIGHT) { say('Ho già due richieste in volo, un attimo…'); return; }
   if (lastInterim.trim()) {
     // Prendo anche le parole provvisorie (come segmento in coda) e riavvio l'ascolto:
     // cosi Chrome non me le rimanda come finali un secondo dopo, duplicandole.
@@ -746,6 +781,7 @@ function openSet(){
   $('fFallback').value = C.fallback || '';
   $('fPause').value = C.pause;
   $('fEvery').value = C.every;
+  $('fBudget').value = C.budget;
   $('fFast').checked = C.fast;
   $('fAuto').checked = C.auto;
   $('fSrc').checked = C.src;
@@ -764,6 +800,7 @@ $('bSave').addEventListener('click', function(){
   C.pause = Math.min(15, Math.max(1, parseFloat($('fPause').value) || 2.5));
   C.every = parseInt($('fEvery').value, 10) || 0;
   if (C.every > 0 && C.every < 10) C.every = 10;
+  C.budget = Math.min(120, Math.max(5, parseInt($('fBudget').value, 10) || 20));
   C.fast = $('fFast').checked;
   C.auto = $('fAuto').checked;
   C.src  = $('fSrc').checked;
