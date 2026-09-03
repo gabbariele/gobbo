@@ -202,6 +202,24 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
     <div class="hint">Se il principale è sovraccarico (503), in coda (429) o non risponde entro 12 secondi,
       la richiesta passa subito a questo. La scheda indica da quale modello arriva.</div>
 
+    <label>Seconda riserva &mdash; OpenAI</label>
+        <select id="fFallback2">
+          <option value="">(nessuna)</option>
+          <option value="gpt-5-mini">gpt-5-mini (consigliato)</option>
+          <option value="gpt-5-nano">gpt-5-nano (il più economico)</option>
+          <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+          <option value="gpt-4o-mini">gpt-4o-mini</option>
+        </select>
+    <div class="two" style="align-items:stretch">
+      <div><input type="text" id="fOProxy" placeholder="./openai.php" autocomplete="off" spellcheck="false"></div>
+      <button class="btn sec" id="bOCheck" style="flex:0 0 auto;height:auto;padding:0 16px">Verifica</button>
+    </div>
+    <input type="password" id="fOToken" placeholder="Parola d’ordine del ponte (se l’hai impostata)" autocomplete="off">
+    <div class="hint" id="okeyMsg">Terzo tentativo, quando anche la riserva è sovraccarica: se Google è in affanno lo è su
+      tutti i suoi modelli, e l’unica mossa che resta è cambiare fornitore. OpenAI però non accetta chiamate dal browser,
+      quindi passa dal file <code>openai.php</code> caricato accanto all’app: la chiave OpenAI sta lì, sul server, non sul
+      telefono. Lascia vuoto per saltare questo passaggio e funzionare esattamente come prima.</div>
+
     <div class="two">
       <div>
         <label>Pausa (sec)</label>
@@ -217,7 +235,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 
     <label>Tempo massimo per una risposta (sec)</label>
     <input type="number" id="fBudget" min="5" max="120" step="5">
-    <div class="hint">Se Gemini è sovraccarico, entro questo tempo alterna principale e riserva con attese crescenti.
+    <div class="hint">Se Gemini è sovraccarico, entro questo tempo gira fra principale, riserva e seconda riserva con attese crescenti.
       Scaduto, rinuncia a quel pezzo e va avanti: perdi una scheda, non la sessione. Intanto altre richieste partono lo stesso.</div>
 
     <div class="row"><input type="checkbox" id="fFast"><label for="fFast">Modalità veloce (niente ragionamento esteso)</label></div>
@@ -264,7 +282,9 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <script>
 /* ============================ stato ============================ */
 var LS = 'gobbo.v1';
-var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash', pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[]};
+var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash',
+         oproxy:'', otoken:'', fallback2:'gpt-5-mini', omodels:[],
+         pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[]};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
@@ -315,7 +335,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-03c';
+var VERSION = '2026-09-03d';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -331,6 +351,7 @@ function clock(ms){
 }
 function logText(){
   var lines = ['Gobbo ' + VERSION + ' · ' + navigator.userAgent, 'modello ' + C.model + ' / riserva ' + (C.fallback || '-') +
+    ' / riserva 2 ' + (C.fallback2 ? C.fallback2 + (C.oproxy ? ' via ' + C.oproxy : ' (senza ponte: saltata)') : '-') +
     ' · pausa ' + C.pause + ' s · ogni ' + C.every + ' s · budget ' + C.budget + ' s · auto ' + C.auto + ' · fast ' + C.fast, ''];
   for (var i = 0; i < LOG.length; i++) {
     var l = LOG[i], d = (typeof l.d === 'object') ? JSON.stringify(l.d) : String(l.d);
@@ -414,11 +435,28 @@ function buildPrompt(testo, contesto){
 /* Errori per cui ha senso passare alla riserva: il modello e' sovraccarico o in coda,
    il servizio e' giu', oppure non risponde in tempo. Non per chiave sbagliata o richiesta malformata. */
 function isOverload(e){
+  if (!e || e.fatal) return false;                    // chiave sbagliata, credito finito, modello inesistente: ritentare e' solo tempo perso
   return !!e && (e.timeout || e.status === 408 || e.status === 429 || e.status === 500 || e.status === 502 || e.status === 503 || e.status === 504
     || /overload|high demand|unavailable|exhausted|try again|deadline/i.test(e.message || ''));
 }
 
 function short(m){ return String(m).replace(/^gemini-/, ''); }
+
+/* Da che parte mandare la richiesta. Il nome del modello basta a dirlo:
+   tutto quello che comincia per gpt/o<n>/chatgpt e' OpenAI, il resto e' Gemini. */
+function provider(m){ return /^(gpt-|o[1-9]|chatgpt)/i.test(String(m)) ? 'openai' : 'gemini'; }
+/* Un modello e' utilizzabile se c'e' come raggiungerlo: Gemini vuole la chiave nel telefono,
+   OpenAI vuole il ponte sul server (la sua chiave sta li', non qui). */
+function keyFor(m){ return provider(m) === 'openai' ? C.oproxy : C.key; }
+
+/* Intestazioni per il ponte: la parola d'ordine, se l'hai impostata, evita che
+   chiunque passi dal tuo indirizzo e ti consumi il credito. */
+function proxyHeaders(json){
+  var h = {};
+  if (json) h['Content-Type'] = 'application/json';
+  if (C.otoken) h['X-Gobbo-Token'] = C.otoken;
+  return h;
+}
 function fmtS(ms){ return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; }
 
 /* Regole (le stesse di un'app dal vivo che non si pianta):
@@ -427,10 +465,17 @@ function fmtS(ms){ return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; }
    - attesa crescente con tetto e fattore casuale 0,7-1,3, alternando principale e riserva;
    - Retry-After ha la precedenza; se chiede piu' del budget residuo, mi arrendo subito. */
 function ask(testo, contesto){
-  if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
+  if (!C.key && !C.oproxy) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
   var u = buildPrompt(testo, contesto);
-  var models = [C.model];
-  if (C.fallback && C.fallback !== C.model) models.push(C.fallback);
+  /* La catena: principale -> riserva -> seconda riserva (OpenAI). Il terzo anello serve
+     proprio quando Google e' in ginocchio del tutto: cambiare modello dentro Gemini non
+     aiuta se e' il servizio a essere saturo, cambiare fornitore si'. Senza la sua chiave
+     l'anello viene semplicemente saltato, senza errori. */
+  var models = [];
+  [C.model, C.fallback, C.fallback2].forEach(function(m){
+    if (m && models.indexOf(m) < 0 && keyFor(m)) models.push(m);
+  });
+  if (!models.length) return Promise.reject(new Error('Nessun modello utilizzabile: controlla modello e chiave nelle impostazioni'));
   var budgetMs = Math.max(5, C.budget || 20) * 1000, t0 = Date.now(), attempt = 0, errs = [];
   function remaining(){ return budgetMs - (Date.now() - t0); }
   function giveUp(extra){
@@ -464,6 +509,10 @@ function ask(testo, contesto){
 }
 
 function askModel(model, u, timeoutMs){
+  return provider(model) === 'openai' ? askOpenAI(model, u, timeoutMs) : askGemini(model, u, timeoutMs);
+}
+
+function askGemini(model, u, timeoutMs){
   var gc = { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 1.0 };
   if (C.fast) { var tc = fastThinking(model); if (tc) gc.thinkingConfig = tc; }
 
@@ -514,6 +563,89 @@ function askModel(model, u, timeoutMs){
   });
 }
 
+
+/* ============================ chiamata OpenAI (seconda riserva) ============================
+   Stesso contratto di askGemini: prende il testo, restituisce l'oggetto con punti/filosofo/
+   parafrasi/citazione, alza errori con .status/.retryAfter/.timeout perche' ask() sappia
+   se ha senso ritentare. Cambia solo il modo di dirlo: chat/completions, la chiave in
+   Authorization, e lo schema passato come json_schema in modalita' strict.
+   Lo schema e' lo stesso di Gemini piu' additionalProperties:false, che li' non e' ammesso. */
+var OSCHEMA = {
+  type: "object",
+  properties: {
+    punti:     { type: "array", items: { type: "string" } },
+    filosofo:  { type: "string" },
+    parafrasi: { type: "string" },
+    citazione: { type: "string" }
+  },
+  required: ["punti", "filosofo", "parafrasi", "citazione"],
+  additionalProperties: false
+};
+
+function askOpenAI(model, u, timeoutMs){
+  if (!C.oproxy) { var ke = new Error('manca l’indirizzo del ponte OpenAI'); ke.fatal = true; return Promise.reject(ke); }
+
+  var body = {
+    model: model,
+    messages: [{ role: 'system', content: SYS }, { role: 'user', content: u }],
+    response_format: { type: 'json_schema', json_schema: { name: 'gobbo', strict: true, schema: OSCHEMA } }
+  };
+  /* Modalita' veloce: sui gpt-5 il ragionamento si riduce con reasoning_effort.
+     Gli altri (4o/4.1) non hanno la voce, e ometterla e' meglio che farsi rifiutare la richiesta. */
+  if (C.fast && /^gpt-5/i.test(model)) body.reasoning_effort = 'minimal';
+
+  var ctrl = new AbortController();
+  var to = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
+
+  return fetch(C.oproxy, {
+    method: 'POST',
+    headers: proxyHeaders(true),
+    signal: ctrl.signal,
+    body: JSON.stringify(body)
+  }).catch(function(e){
+    clearTimeout(to);
+    var err = new Error(e.name === 'AbortError' ? 'nessuna risposta entro ' + Math.round(timeoutMs / 1000) + ' s' : 'ponte non raggiungibile');
+    err.timeout = (e.name === 'AbortError');
+    throw err;
+  }).then(function(r){
+    clearTimeout(to);
+    if (r.ok) return r.json();
+    return r.json().catch(function(){ return null; }).then(function(j){
+      var e0 = (j && j.error) || {};
+      var code = e0.code || '';
+      var m = e0.message || (r.status + ' ' + r.statusText), fatal = false;
+      /* Tre famiglie di guai, e solo una vale la pena di ritentarla.
+         1. Il ponte non c'e' o non e' configurato: il messaggio dice gia' cosa fare, e
+            insistere per tutto il budget non lo fa comparire. Fuori subito.
+         2. Il ponte c'e' ma OpenAI si lamenta (gobbo_upstream): allora contano le solite
+            regole sullo stato, e il messaggio di OpenAI passa intatto perche' e' piu' preciso
+            di qualunque cosa possa scrivere qui.
+         3. Nessun JSON: non e' nemmeno il ponte a rispondere. Quasi sempre il file non c'e'. */
+      var ponte = /^gobbo_/.test(code);
+      if (!j) { m = 'Il ponte non risponde da ' + C.oproxy + ' (' + r.status + '): file non caricato?'; fatal = true; }
+      else if (ponte && code !== 'gobbo_upstream') { fatal = true; }
+      else if (r.status === 401 || /invalid_api_key/i.test(code)) { if (!ponte) m = 'Chiave OpenAI non valida sul ponte'; fatal = true; }
+      else if (/insufficient_quota|billing/i.test(code)) { m = 'OpenAI: credito esaurito'; fatal = true; }
+      else if (r.status === 404) { if (!ponte) m = 'Modello "' + model + '" non disponibile per la chiave del ponte'; fatal = true; }
+      else if (r.status === 400) { fatal = true; }
+      else if (r.status === 429) { m = 'troppe richieste (429)'; }
+      else if (r.status === 503) { m = 'sovraccarico (503)'; }
+      var err = new Error(m); err.status = r.status; err.fatal = fatal;
+      var ra = parseFloat(r.headers && r.headers.get ? r.headers.get('retry-after') : '');
+      if (!isNaN(ra)) err.retryAfter = ra;
+      throw err;
+    });
+  }).then(function(j){
+    var msg = (((j.choices || [])[0] || {}).message) || {};
+    if (msg.refusal) throw new Error('OpenAI ha rifiutato: ' + msg.refusal);
+    if (!msg.content) throw new Error('Risposta vuota (' + (((j.choices || [])[0] || {}).finish_reason || 'nessun contenuto') + ')');
+    var o = JSON.parse(msg.content);
+    if (!Array.isArray(o.punti)) o.punti = [String(o.punti || '')];
+    o.punti = o.punti.filter(Boolean).slice(0, 3);
+    return o;
+  });
+}
+
 /* Il modo per ridurre il "ragionamento" cambia tra le famiglie di modelli:
    2.5 -> thinkingBudget (0 = spento, solo sui flash); 3.x -> thinkingLevel
    ("minimal" dove esiste, altrimenti "low", accettato da tutti i 3.x). */
@@ -546,6 +678,38 @@ function checkKey(){
       msg.textContent = 'Chiave valida: ' + ids.length + ' modelli disponibili, elenco aggiornato qui sotto.';
     })
     .catch(function(e){ msg.textContent = 'Errore: ' + e.message; });
+}
+
+/* Come checkKey ma per OpenAI: la chiave e' valida se /v1/models risponde,
+   e la risposta serve anche a riempire l'elenco con i modelli davvero abilitati. */
+function checkOKey(){
+  var url = $('fOProxy').value.trim(), msg = $('okeyMsg');
+  if (!url) { msg.textContent = 'Scrivi prima l’indirizzo del ponte (di solito ./openai.php).'; return; }
+  msg.textContent = 'Provo il ponte…';
+  var tok = $('fOToken').value.trim();
+  var h = {}; if (tok) h['X-Gobbo-Token'] = tok;
+  fetch(url, { headers: h })
+    .then(function(r){ return r.json().catch(function(){ return null; }).then(function(j){ return { r: r, j: j }; }); })
+    .then(function(x){
+      if (!x.j) throw new Error('nessuna risposta JSON (HTTP ' + x.r.status + '): il file c’e’ e il PHP gira?');
+      if (!x.r.ok || x.j.ok === false) throw new Error((x.j.error && x.j.error.message) || (x.r.status + ' ' + x.r.statusText));
+      var ids = (x.j.models || []).filter(function(n){ return /^(gpt-|o[1-9]|chatgpt)/i.test(n); });
+      if (!ids.length) throw new Error('ponte raggiunto ma nessun modello disponibile con quella chiave');
+      C.omodels = ids; save();
+      fillOModels(ids);
+      msg.textContent = 'Ponte attivo: ' + ids.length + ' modelli OpenAI, elenco aggiornato qui sopra.';
+    })
+    .catch(function(e){ msg.textContent = 'Ponte non funzionante: ' + e.message; });
+}
+
+/* I mini/nano in cima: dal palco la riserva deve costare poco e rispondere in fretta. */
+function fillOModels(ids){
+  ids = ids.slice().sort(function(a, b){
+    var ca = /nano|mini/.test(a), cb = /nano|mini/.test(b);
+    if (ca !== cb) return ca ? -1 : 1;
+    return b.localeCompare(a, undefined, { numeric: true });
+  });
+  fillSelect($('fFallback2'), ids, true);
 }
 
 function fillModels(ids){
@@ -837,6 +1001,11 @@ function openSet(){
   $('fModel').value = C.model;
   ensureOption($('fFallback'), C.fallback);
   $('fFallback').value = C.fallback || '';
+  $('fOProxy').value = C.oproxy;
+  $('fOToken').value = C.otoken;
+  if (C.omodels && C.omodels.length) fillOModels(C.omodels);
+  ensureOption($('fFallback2'), C.fallback2);
+  $('fFallback2').value = C.fallback2 || '';
   $('fPause').value = C.pause;
   $('fEvery').value = C.every;
   $('fBudget').value = C.budget;
@@ -849,12 +1018,16 @@ function openSet(){
 
 $('bSet').addEventListener('click', openSet);
 $('bCheck').addEventListener('click', checkKey);
+$('bOCheck').addEventListener('click', checkOKey);
 
 $('bSave').addEventListener('click', function(){
   C.key = $('fKey').value.trim();
   C.ctx = $('fCtx').value;
   C.model = $('fModel').value;
   C.fallback = $('fFallback').value;
+  C.oproxy = $('fOProxy').value.trim();
+  C.otoken = $('fOToken').value.trim();
+  C.fallback2 = $('fFallback2').value;
   C.pause = Math.min(15, Math.max(1, parseFloat($('fPause').value) || 2.5));
   C.every = parseInt($('fEvery').value, 10) || 0;
   if (C.every > 0 && C.every < 10) C.every = 10;
