@@ -1,0 +1,5 @@
+# Gobbo non va indicizzato: e' online solo perche' il microfono del browser
+# pretende HTTPS, non perche' debba trovarlo qualcuno.
+
+User-agent: *
+Disallow: /

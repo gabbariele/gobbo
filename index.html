@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#0a0b0d">
+<!-- Fuori dai motori di ricerca: l'app e' pubblica per necessita' (serve HTTPS e un indirizzo
+     raggiungibile dal telefono), non perche' debba trovarla qualcuno. Meno la si trova, meno
+     gente arriva a bussare al ponte OpenAI. -->
+<meta name="robots" content="noindex, nofollow, noarchive">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Gobbo</title>
@@ -218,7 +222,9 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
     <div class="hint" id="okeyMsg">Terzo tentativo, quando anche la riserva è sovraccarica: se Google è in affanno lo è su
       tutti i suoi modelli, e l’unica mossa che resta è cambiare fornitore. OpenAI però non accetta chiamate dal browser,
       quindi passa dal file <code>openai.php</code> caricato accanto all’app: la chiave OpenAI sta lì, sul server, non sul
-      telefono. Lascia vuoto per saltare questo passaggio e funzionare esattamente come prima.</div>
+      telefono. Lascia vuoto per saltare questo passaggio e funzionare esattamente come prima.
+      Senza la tua chiave Gemini qui sopra non parte nulla, nemmeno questa: il ponte non è a disposizione
+      di chi capita sull’indirizzo dell’app.</div>
 
     <div class="two">
       <div>
@@ -335,7 +341,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-03d';
+var VERSION = '2026-09-03e';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -465,7 +471,10 @@ function fmtS(ms){ return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; }
    - attesa crescente con tetto e fattore casuale 0,7-1,3, alternando principale e riserva;
    - Retry-After ha la precedenza; se chiede piu' del budget residuo, mi arrendo subito. */
 function ask(testo, contesto){
-  if (!C.key && !C.oproxy) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
+  /* La chiave Gemini e' il biglietto d'ingresso, e vale per tutta la catena: senza,
+     non parte niente - nemmeno il ponte OpenAI, che costa e sta su un indirizzo pubblico.
+     Chi apre l'app senza portarsi la propria chiave non arriva a spendere il credito altrui. */
+  if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
   var u = buildPrompt(testo, contesto);
   /* La catena: principale -> riserva -> seconda riserva (OpenAI). Il terzo anello serve
      proprio quando Google e' in ginocchio del tutto: cambiare modello dentro Gemini non
@@ -583,6 +592,9 @@ var OSCHEMA = {
 };
 
 function askOpenAI(model, u, timeoutMs){
+  /* Seconda serratura, sulla porta invece che sul cancello: il ponte non si apre
+     a chi non ha la sua chiave Gemini, per qualunque strada ci arrivi. */
+  if (!C.key) { var ge = new Error('serve prima la tua chiave Gemini'); ge.fatal = true; return Promise.reject(ge); }
   if (!C.oproxy) { var ke = new Error('manca l’indirizzo del ponte OpenAI'); ke.fatal = true; return Promise.reject(ke); }
 
   var body = {
@@ -684,6 +696,7 @@ function checkKey(){
    e la risposta serve anche a riempire l'elenco con i modelli davvero abilitati. */
 function checkOKey(){
   var url = $('fOProxy').value.trim(), msg = $('okeyMsg');
+  if (!$('fKey').value.trim() && !C.key) { msg.textContent = 'Prima la chiave Gemini, qui sopra: senza quella la seconda riserva non parte comunque.'; return; }
   if (!url) { msg.textContent = 'Scrivi prima l’indirizzo del ponte (di solito ./openai.php).'; return; }
   msg.textContent = 'Provo il ponte…';
   var tok = $('fOToken').value.trim();

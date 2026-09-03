@@ -34,6 +34,7 @@ if (is_file($conf)) {
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
 header('X-Content-Type-Options: nosniff');
+header('X-Robots-Tag: noindex, nofollow');   // il ponte non ha niente da far indicizzare
 
 $origin = isset($_SERVER['HTTP_ORIGIN']) ? $_SERVER['HTTP_ORIGIN'] : '';
 if ($origin !== '' && in_array($origin, $CFG['origins'], true)) {

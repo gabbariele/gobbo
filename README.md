@@ -53,6 +53,20 @@ parola d'ordine serve proprio a questo: l'indirizzo e' pubblico come il resto de
 Se lasci vuoto l'indirizzo del ponte, questo terzo passaggio semplicemente non esiste e Gobbo
 si comporta esattamente come prima.
 
+**Chi puo' usare il ponte.** Tre serrature, tutte necessarie insieme:
+
+1. **la chiave Gemini.** Senza, Gobbo non parte affatto: nessuna analisi, nemmeno quella di
+   riserva. Chi apre l'indirizzo dell'app senza portarsi la propria chiave non arriva a
+   spendere il tuo credito OpenAI. E non basta scriverne una a caso: una chiave sbagliata
+   fa fallire Gemini con un errore definitivo, che ferma la catena prima della riserva -
+   al ponte ci si arriva solo con una chiave *funzionante* che ha trovato Google sovraccarico.
+2. **la parola d'ordine**, che il ponte pretende a ogni richiesta.
+3. **l'elenco dei modelli** in `openai-config.php`, che limita il danno anche a chi passasse
+   le prime due.
+
+In piu' l'app e' `noindex` e c'e' un `robots.txt` che chiude tutto: e' online perche' il
+microfono del browser pretende HTTPS, non perche' debba trovarla qualcuno.
+
 ## 2. Metterla online (serve HTTPS)
 
 Il microfono nel browser funziona **solo su HTTPS** o su `localhost`. Due strade:
@@ -120,6 +134,7 @@ poi apri `http://localhost:8099` in Chrome.
 | Sintomo | Causa probabile |
 |---|---|
 | *Chiave API non valida* | chiave copiata male, o creata su un progetto senza API abilitata |
+| *Manca la chiave API* | vale per tutta la catena, seconda riserva compresa: senza chiave Gemini non parte niente |
 | *Modello non disponibile per questa chiave* | usa **Verifica**: ti mostra quelli che hai davvero |
 | *sovraccarico (503)* / *troppe richieste (429)* | Google è in affanno o sei oltre il limite del piano: ritenta girando fra principale, **riserva** e **seconda riserva** finché dura il budget, e intanto ti dice cosa fa. Se vedi spesso *Niente risposta entro N s*, alza il budget o la Pausa |
 | *Il ponte non risponde da ./openai.php* | il file non è stato caricato sul server, o quella cartella non esegue PHP |
@@ -185,6 +200,7 @@ sito cancella anche la chiave.
 
 ```
 index.html            tutta l'app (interfaccia + logica + prompt)
+robots.txt            tiene l'app fuori dai motori di ricerca
 openai.php            il ponte verso OpenAI (solo se usi la seconda riserva)
 openai-config.sample.php  da copiare in openai-config.php: chiave e parola d'ordine
 manifest.json         metadati PWA per l'installazione
