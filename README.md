@@ -37,10 +37,30 @@ CORS, e Chrome blocca la richiesta prima ancora che parta - a differenza di Gemi
 le accetta. Per questo serve un file che faccia da ponte, sul server dove sta gia' l'app:
 
 1. copia **`openai.php`** accanto a `index.html`;
-2. copia `openai-config.sample.php` in **`openai-config.php`** e mettici dentro la chiave OpenAI
-   (https://platform.openai.com/api-keys) e una **parola d'ordine** a piacere;
-3. nell'app: **⚙ → Seconda riserva — OpenAI** → modello `gpt-5-mini`, indirizzo `./openai.php`,
+2. **prima di caricare la chiave**, apri `https://tuodominio/openai.php` nel browser. Se esce
+   `{"ok":false,...,"code":"gobbo_no_key"}` PHP viene eseguito e puoi andare avanti. Se invece
+   ti scarica il file o ti mostra il codice, **fermati**: quella cartella non esegue PHP, e un
+   file di configurazione li' dentro sarebbe scaricabile da chiunque (vedi *Se PHP non gira*);
+3. copia `openai-config.sample.php` in **`openai-config.php`** con la chiave OpenAI
+   (https://platform.openai.com/api-keys) e una **parola d'ordine** a piacere, e mettilo
+   **fuori dalla cartella servita dal web**. Il ponte lo cerca in tre posti, in quest'ordine:
+   il percorso in `GOBBO_CONFIG`, un livello sopra se stesso, poi accanto a se stesso - e se
+   lo trova dentro il document root te lo dice con un avviso su **Verifica**;
+4. nell'app: **⚙ → Seconda riserva — OpenAI** → modello `gpt-5-mini`, indirizzo `./openai.php`,
    la stessa parola d'ordine → **Verifica** → **Salva**.
+
+### Se PHP non gira
+
+Capita, ed e' il motivo per cui il punto 2 va fatto prima del 3: un sito servito come statico
+non passa i `.php` all'interprete, e nginx li manda al browser come file da scaricare - codice
+e chiavi compresi. Con il solo accesso FTP non si sistema, perche' e' configurazione del server.
+Due strade:
+
+- **abilitare PHP per quel sito** (con WordOps si fa da riga di comando, serve l'accesso SSH);
+- **mettere il ponte su un altro tuo dominio che PHP lo esegue**, e puntarci l'app con l'URL
+  completo. La chiamata diventa cross-origin, quindi in `openai-config.php` elenca l'origine
+  dell'app: `'origins' => array('https://gobbo.weelab.net')`. Il ponte risponde al preflight
+  e il giro funziona.
 
 «Verifica» chiede al ponte l'elenco dei modelli che quella chiave ha davvero: se risponde,
 il giro funziona in tutti e due i sensi.
@@ -137,7 +157,7 @@ poi apri `http://localhost:8099` in Chrome.
 | *Manca la chiave API* | vale per tutta la catena, seconda riserva compresa: senza chiave Gemini non parte niente |
 | *Modello non disponibile per questa chiave* | usa **Verifica**: ti mostra quelli che hai davvero |
 | *sovraccarico (503)* / *troppe richieste (429)* | Google è in affanno o sei oltre il limite del piano: ritenta girando fra principale, **riserva** e **seconda riserva** finché dura il budget, e intanto ti dice cosa fa. Se vedi spesso *Niente risposta entro N s*, alza il budget o la Pausa |
-| *Il ponte non risponde da ./openai.php* | il file non è stato caricato sul server, o quella cartella non esegue PHP |
+| *Il ponte non risponde da ./openai.php* | il file non è stato caricato, o quella cartella non esegue PHP: aprilo nel browser — se lo scarica invece di rispondere JSON, è il secondo caso |
 | *Parola d'ordine del ponte mancante o sbagliata* | quella nelle impostazioni e quella in `openai-config.php` non coincidono |
 | *Chiave OpenAI non valida sul ponte* | la chiave in `openai-config.php`: il ponte c'è e risponde, è il contenuto a essere sbagliato |
 | *Microfono negato* | Chrome → ⋮ → Impostazioni sito → Microfono → Consenti |

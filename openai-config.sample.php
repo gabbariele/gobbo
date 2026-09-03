@@ -1,6 +1,20 @@
 <?php
-/* Copia questo file in openai-config.php (stessa cartella) e riempilo.
-   openai-config.php non finisce su git: e' escluso in .gitignore. */
+/* Copia questo file in openai-config.php e riempilo.
+   openai-config.php non finisce su git: e' escluso in .gitignore.
+ *
+ * DOVE METTERLO, e conta piu' di quanto sembri: FUORI dalla cartella servita dal
+ * web, non accanto a index.html. Se il server non esegue PHP - i siti statici
+ * spesso non lo fanno - un file .php nella cartella pubblica viene servito come
+ * testo, e la chiave qui dentro se la scarica chiunque.
+ *
+ *   /home/tuosito/openai-config.php      <- qui, al riparo
+ *   /home/tuosito/htdocs/openai.php      <- il ponte, pubblico
+ *   /home/tuosito/htdocs/index.html
+ *
+ * openai.php lo cerca in tre posti, in quest'ordine: il percorso nella variabile
+ * d'ambiente GOBBO_CONFIG, un livello sopra se stesso, poi accanto a se stesso.
+ * Se lo trova dentro il document root te lo dice, con un avviso nella risposta al
+ * pulsante Verifica. In alternativa: niente file, e la chiave in OPENAI_API_KEY. */
 
 return array(
 

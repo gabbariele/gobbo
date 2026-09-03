@@ -710,7 +710,8 @@ function checkOKey(){
       if (!ids.length) throw new Error('ponte raggiunto ma nessun modello disponibile con quella chiave');
       C.omodels = ids; save();
       fillOModels(ids);
-      msg.textContent = 'Ponte attivo: ' + ids.length + ' modelli OpenAI, elenco aggiornato qui sopra.';
+      msg.textContent = 'Ponte attivo: ' + ids.length + ' modelli OpenAI, elenco aggiornato qui sopra.' +
+        (x.j.avviso ? ' Attenzione: ' + x.j.avviso + '.' : '');
     })
     .catch(function(e){ msg.textContent = 'Ponte non funzionante: ' + e.message; });
 }

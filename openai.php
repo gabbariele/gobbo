@@ -25,10 +25,42 @@ $CFG = array(
     'timeout'  => 25,        // secondi
     'max_body' => 200000,    // byte
 );
-$conf = __DIR__ . '/openai-config.php';
-if (is_file($conf)) {
-    $c = require $conf;
-    if (is_array($c)) { $CFG = array_replace($CFG, $c); }
+/* Dove cercare la configurazione, in quest'ordine.
+ *
+ * Prima fuori dal web root, e non e' un vezzo: se il server non esegue PHP - succede, i
+ * siti statici spesso non lo fanno - allora un file .php accanto all'app viene servito
+ * come testo, e la chiave dentro diventa scaricabile da chiunque. Un piano sopra la
+ * cartella pubblica il web non ci arriva, qualunque cosa faccia nginx.
+ *
+ * La seconda posizione resta per comodita', ma vale solo se hai verificato che PHP gira.
+ */
+$CONF_TROVATA = '';
+$candidati = array(
+    getenv('GOBBO_CONFIG') ? getenv('GOBBO_CONFIG') : null,  // percorso esplicito, se preferisci decidere tu
+    dirname(__DIR__) . '/openai-config.php',                 // un livello sopra il ponte
+    __DIR__ . '/openai-config.php',                          // accanto al ponte: solo se PHP viene eseguito
+);
+foreach ($candidati as $c) {
+    if ($c && is_file($c)) {
+        $x = require $c;
+        if (is_array($x)) { $CFG = array_replace($CFG, $x); }
+        $CONF_TROVATA = $c;
+        break;
+    }
+}
+
+/* Il file e' al riparo o dentro l'albero servito dal web? La domanda non e' "quanti
+   livelli sopra sta" - se il ponte vive in una sottocartella, un livello sopra e'
+   ancora pubblico - ma se il suo percorso cade dentro il document root. */
+$CONF_ESPOSTA = false;
+if ($CONF_TROVATA !== '' && !empty($_SERVER['DOCUMENT_ROOT'])) {
+    $radice = realpath($_SERVER['DOCUMENT_ROOT']);
+    $dove   = realpath($CONF_TROVATA);
+    if ($radice && $dove) {
+        $radice = rtrim(str_replace('\\', '/', $radice), '/') . '/';
+        $dove   = str_replace('\\', '/', $dove);
+        $CONF_ESPOSTA = (strpos($dove, $radice) === 0);
+    }
 }
 
 header('Content-Type: application/json; charset=utf-8');
@@ -135,7 +167,13 @@ if ($metodo === 'GET') {
         if (!empty($CFG['models']) && !in_array($n, $CFG['models'], true)) { continue; }
         $ids[] = $n;
     }
-    echo json_encode(array('ok' => true, 'models' => array_values($ids)), JSON_UNESCAPED_SLASHES);
+    $esito = array('ok' => true, 'models' => array_values($ids));
+    /* Il ponte sa dove ha letto la chiave, e lo dice: se sta nella cartella pubblica
+       conviene saperlo subito, non il giorno in cui il server smette di eseguire PHP. */
+    if ($CONF_ESPOSTA) {
+        $esito['avviso'] = 'la chiave e in un file dentro la cartella servita dal web: spostalo fuori, se il server smette di eseguire PHP diventa scaricabile';
+    }
+    echo json_encode($esito, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
 }
 
