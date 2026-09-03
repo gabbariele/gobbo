@@ -269,31 +269,38 @@ var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 
 var rec = null, running = false, wantOn = false;
-var buf = '';          // testo finale non ancora analizzato (ricostruito dai segmenti, vedi joinSegs)
+var buf = '';          // testo non ancora analizzato, ricomposto dal flusso dei risultati definitivi
 var full = loadFull();   // trascrizione gia' analizzata (contesto + export); persiste 12 ore
 /* Chrome su Android riporta piu' volte lo stesso segmento con testo via via piu' lungo,
    spesso gia' marcato isFinal, e riparte da indice 0 a ogni evento. Appendere ogni volta
    produce "Talete / Talete mercante / Talete mercante prima...". Percio' tengo il testo PER
    INDICE e lo sovrascrivo: ogni segmento entra una volta sola, nella sua versione finale. */
-var gen = 0;             // numero dell'istanza di riconoscimento (gli indici ripartono a ogni riavvio)
-var segs = [];           // LISTA ORDINATA di segmenti { g, i, text, sent, off }: istanza, indice, testo,
-                         //   se gia' analizzato, da quale carattere parte la parte nuova.
-                         //   Lista e non mappa per indice: su Android una frase nuova arriva sullo STESSO
-                         //   indice della precedente, e la precedente, se non ancora analizzata, va tenuta.
-function liveSeg(g, i){  // l'ultimo segmento per (istanza, indice): e' quello che Chrome sta ancora aggiornando
-  for (var k = segs.length - 1; k >= 0; k--) if (segs[k].g === g && segs[k].i === i) return segs[k];
-  return null;
-}
-var seenLen = 0;         // indici visti nell'istanza corrente (serve a ORA per accodare il provvisorio)
+/* Niente piu' contabilita' per indice: guardo SOLO il testo.
+   A ogni evento Chrome mi da' l'insieme dei risultati definitivi; li concateno e ottengo
+   "quello che ha capito finora" (evF). Confrontandolo con il precedente capisco da solo
+   se la frase sta crescendo o se ne e' iniziata una nuova - senza dipendere dagli indici,
+   che su Android ripartono da zero e mi hanno gia' fatto perdere il testo due volte. */
+var chunkText = '';   // frasi chiuse, non ancora analizzate
+var curFinal  = '';   // frase in corso, ancora soggetta a revisione
+var sentFinal = '';   // com'era curFinal all'ultima analisi: serve a scartarne le riedizioni
 
-/* Su Android la frase successiva a una pausa RIUSA l'indice 0. Quindi non posso decidere
-   dagli indici cosa e' gia' stato analizzato: decido dal testo. Stesso indice e testo che
-   prolunga o corregge il precedente = revisione dello stesso segmento; testo diverso = frase nuova. */
 function commonPrefix(a, b){
   var n = 0, m = Math.min(a.length, b.length);
   while (n < m && a.charAt(n) === b.charAt(n)) n++;
   return n;
 }
+/* Da dove comincia la parte di 'cur' che non era gia' in 'prev' (a inizio parola). */
+function newPart(prev, cur){
+  if (!prev) return cur;
+  if (!isRevision(prev, cur)) return cur;
+  var k = commonPrefix(prev, cur);
+  if (k >= cur.length) return '';   // 'cur' e' tutto dentro 'prev': non c'e' niente di nuovo
+                                    // (senza questo, ogni analisi ripartiva dall'ultima parola della precedente)
+  if (cur.charAt(k) !== ' ') while (k > 0 && cur.charAt(k - 1) !== ' ') k--;
+  return cur.slice(k).trim();
+}
+function stripSent(t){ return sentFinal ? newPart(sentFinal, t) : t; }
+
 function isRevision(a, b){
   var n = commonPrefix(a, b), m = Math.min(a.length, b.length);
   if (n === m) return true;   // uno e' l'inizio dell'altro: e' sempre la stessa frase che cresce
@@ -308,7 +315,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-03a';
+var VERSION = '2026-09-03c';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -333,7 +340,7 @@ function logText(){
 }
 function diagSummary(){
   return 'ascolto ' + (wantOn ? 'ON' : 'OFF') + (running ? ' (attivo)' : '') + ' · buffer ' + buf.trim().length + ' car.' +
-    ' · in volo ' + inflight + ' · schede ' + hist.length + ' · istanza #' + gen + ' · eventi ' + LOG.length;
+    ' · in volo ' + inflight + ' · schede ' + hist.length + ' · in corso ' + curFinal.length + '/chiuse ' + chunkText.length + '/analizzata ' + sentFinal.length + ' car. · eventi ' + LOG.length;
 }
 /* Cintura di sicurezza: se per qualunque motivo il contatore delle richieste in volo resta
    bloccato, dopo budget + 20 s lo azzero, altrimenti l'app rifiuterebbe ogni analisi per sempre. */
@@ -651,7 +658,7 @@ function startRec(){
   if (!SR) { say('Questo browser non sa ascoltare. Usa Chrome su Android.', true); return; }
   if (running) return;
 
-  rec = new SR(); gen++; seenLen = 0; log('sr.new', '#' + gen);
+  rec = new SR(); log('sr.new');
   rec.lang = 'it-IT';
   rec.continuous = true;
   rec.interimResults = true;
@@ -688,42 +695,35 @@ function startRec(){
 }
 
 function onResult(e){
-  var interim = '', gotFinal = false, n = e.results.length;
-  if (n > seenLen) seenLen = n;
+  var finals = [], interim = '', n = e.results.length, gotFinal = false;
   for (var i = 0; i < n; i++) {
     var r = e.results[i], tx = (r[0] && r[0].transcript) || '';
-    if (r.isFinal) {
-      var seg = liveSeg(gen, i), changed = false;
-      if (!seg) {
-        segs.push({ g: gen, i: i, text: tx, sent: false, off: 0 }); changed = true;
-      } else if (seg.text === tx) {
-        // riedizione identica: niente da fare
-      } else if (isRevision(seg.text, tx)) {
-        if (seg.sent) {
-          // gia' analizzato ma Chrome lo allunga/corregge ancora: tengo solo la parte nuova,
-          // dall'inizio della parola in cui divergono
-          var k = commonPrefix(seg.text, tx);
-          if (tx.charAt(k) !== ' ') while (k > 0 && tx.charAt(k - 1) !== ' ') k--;
-          segs.push({ g: gen, i: i, text: tx, sent: false, off: k });
-        } else {
-          seg.text = tx;
-        }
-        changed = true;
-      } else {
-        // testo diverso allo stesso indice: frase NUOVA. La accodo: la precedente resta,
-        // analizzata o no (prima la sovrascrivevo e, se non era ancora partita, si perdeva).
-        segs.push({ g: gen, i: i, text: tx, sent: false, off: 0 }); changed = true;
-      }
-      if (changed) { gotFinal = true; if (!chunkStart) chunkStart = Date.now(); }
-    } else {
-      // le ipotesi provvisorie su Android sono cumulative: se la nuova contiene la precedente, sostituisco
-      interim = (interim && tx.indexOf(interim) === 0) ? tx : interim + tx;
-    }
+    if (r.isFinal) finals.push(tx.trim());
+    else interim = (interim && tx.indexOf(interim) === 0) ? tx : interim + tx;
   }
-  if (gotFinal) buf = joinSegs();
+  var evF = finals.join(' ').replace(/\s+/g, ' ').trim();
+
+  if (evF && evF !== curFinal) {
+    if (isRevision(curFinal, evF)) {
+      curFinal = evF;                       // la stessa frase sta crescendo o si sta correggendo
+    } else {
+      var closed = stripSent(curFinal);     // frase nuova: chiudo la precedente
+      if (closed) chunkText += closed + ' ';
+      sentFinal = '';                       // cio' che era gia' analizzato e' ormai alle spalle
+      curFinal = evF;
+    }
+    gotFinal = true;
+    if (!chunkStart) chunkStart = Date.now();
+  }
+
+  buf = (chunkText + stripSent(curFinal)).replace(/\s+/g, ' ').replace(/^ /, '');
+  if (buf && buf.charAt(buf.length - 1) !== ' ') buf += ' ';
   lastInterim = interim;
+  if (gotFinal) saveFull();
+
   log('sr.result', { n: n, finale: gotFinal, buf: buf.trim().length, interim: interim.length });
   if (/^In ascolto/.test(stat.textContent)) stat.textContent = 'In ascolto · ' + buf.trim().length + ' car.' + (inflight ? ' · ' + inflight + ' in volo' : '') + (C.auto ? '' : ' · automatico spento');
+
   live.classList.add('show');
   live.innerHTML = esc(buf.slice(-190)) + '<b>' + esc(interim) + '</b>';
   live.scrollLeft = live.scrollWidth;   // tiene in vista la coda, cioe le parole appena dette
@@ -765,30 +765,13 @@ function armSilence(){
   }, Math.max(1000, C.pause * 1000));
 }
 
-/* Ricompone il testo non ancora analizzato dai segmenti, in ordine di istanza e di indice. */
-function joinSegs(){
-  var out = [];
-  for (var k = 0; k < segs.length; k++) {
-    var sg = segs[k]; if (sg.sent) continue;
-    var t = sg.text.slice(sg.off).trim(); if (t) out.push(t);
-  }
-  return out.length ? out.join(' ') + ' ' : '';
-}
-
 /* Sposta il buffer nella trascrizione analizzata e restituisce il testo detto PRIMA, come contesto. */
 function takeBuffer(){
   var ctx = full.slice(-700);
   log('buffer.svuotato', buf.trim().length + ' car.');
   if (buf.trim()) { full += buf.trim() + ' '; saveFull(); }
-  // segno come analizzati i segmenti dell'istanza corrente (li tengo per riconoscerne le
-  // riedizioni); quelli di istanze morte non torneranno piu': via
-  var keep = [], seen = {};
-  for (var k = segs.length - 1; k >= 0; k--) {
-    var sg = segs[k]; sg.sent = true;
-    var key = sg.g + ':' + sg.i;
-    if (sg.g === gen && !seen[key]) { seen[key] = 1; keep.unshift(sg); }   // l'ultimo per indice serve al confronto
-  }
-  segs = keep;
+  chunkText = '';
+  sentFinal = curFinal;   // le riedizioni di questa frase verranno scartate; il seguito no
   buf = ''; chunkStart = 0; lastInterim = '';
   live.innerHTML = '';
   live.classList.remove('show');   // libera spazio: mentre leggi la scheda la striscia sparisce
@@ -829,8 +812,9 @@ $('now').addEventListener('click', function(){
   if (lastInterim.trim()) {
     // Prendo anche le parole provvisorie (come segmento in coda) e riavvio l'ascolto:
     // cosi Chrome non me le rimanda come finali un secondo dopo, duplicandole.
-    segs.push({ g: gen, i: seenLen, text: lastInterim.trim(), sent: false, off: 0 }); seenLen++;
-    buf = joinSegs(); lastInterim = '';
+    chunkText += lastInterim.trim() + ' ';
+    buf = (chunkText + stripSent(curFinal)).replace(/\s+/g, ' ');
+    lastInterim = '';
     if (running && rec) { try { rec.abort(); } catch (_) {} }
   }
   var t = buf.trim();
@@ -885,7 +869,7 @@ $('bSave').addEventListener('click', function(){
 });
 
 $('bClear').addEventListener('click', function(){
-  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; segs = [];
+  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; chunkText = ''; curFinal = ''; sentFinal = '';
   saveHist(); saveFull(); render(); say('Storico e trascrizione svuotati.');
 });
 
