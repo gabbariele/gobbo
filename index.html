@@ -341,7 +341,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-03e';
+var VERSION = '2026-09-03f';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -701,10 +701,18 @@ function checkOKey(){
   msg.textContent = 'Provo il ponte…';
   var tok = $('fOToken').value.trim();
   var h = {}; if (tok) h['X-Gobbo-Token'] = tok;
+  /* L'indirizzo per esteso, come lo vede la rete: quando qualcosa non torna, un refuso
+     nel campo o una base diversa da quella che credi si vedono solo cosi'. La corrispondenza
+     in nginx e' esatta e sensibile alle maiuscole, e un ./openai.PHP finisce in un 404
+     indistinguibile da un file mai caricato - se non si legge l'indirizzo chiamato. */
+  var esteso = url;
+  try { esteso = new URL(url, location.href).href; } catch (e) {}
+
   fetch(url, { headers: h })
     .then(function(r){ return r.json().catch(function(){ return null; }).then(function(j){ return { r: r, j: j }; }); })
     .then(function(x){
-      if (!x.j) throw new Error('nessuna risposta JSON (HTTP ' + x.r.status + '): il file c’e’ e il PHP gira?');
+      if (!x.j) throw new Error('nessuna risposta JSON (HTTP ' + x.r.status + ') da ' + esteso +
+                                (x.r.status === 404 ? ' - file non caricato, o nome scritto diversamente' : ' - il PHP gira in quella cartella?'));
       if (!x.r.ok || x.j.ok === false) throw new Error((x.j.error && x.j.error.message) || (x.r.status + ' ' + x.r.statusText));
       var ids = (x.j.models || []).filter(function(n){ return /^(gpt-|o[1-9]|chatgpt)/i.test(n); });
       if (!ids.length) throw new Error('ponte raggiunto ma nessun modello disponibile con quella chiave');
@@ -713,7 +721,10 @@ function checkOKey(){
       msg.textContent = 'Ponte attivo: ' + ids.length + ' modelli OpenAI, elenco aggiornato qui sopra.' +
         (x.j.avviso ? ' Attenzione: ' + x.j.avviso + '.' : '');
     })
-    .catch(function(e){ msg.textContent = 'Ponte non funzionante: ' + e.message; });
+    .catch(function(e){
+      msg.textContent = 'Ponte non funzionante: ' + e.message;
+      log('ponte.verifica', { url: esteso, errore: e.message });   // resta nella Diagnostica, da copiare e mandare
+    });
 }
 
 /* I mini/nano in cima: dal palco la riserva deve costare poco e rispondere in fretta. */
