@@ -230,6 +230,22 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
       <button class="btn sec" id="bExport">Esporta</button>
       <button class="btn pri" id="bSave">Salva</button>
     </div>
+    <div class="acts" style="margin-top:10px">
+      <button class="btn sec" id="bDiag">Diagnostica</button>
+    </div>
+  </div>
+</div>
+
+<!-- diagnostica -->
+<div class="sheet" id="sDiag">
+  <div class="card">
+    <h2>Diagnostica</h2>
+    <div class="hint" id="diagSum" style="margin:0 0 10px"></div>
+    <pre id="diagLog" style="margin:0;max-height:55vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:10px;font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word"></pre>
+    <div class="acts">
+      <button class="btn sec" id="bDiagClose">Chiudi</button>
+      <button class="btn pri" id="bDiagCopy">Copia tutto</button>
+    </div>
   </div>
 </div>
 
@@ -260,8 +276,14 @@ var full = loadFull();   // trascrizione gia' analizzata (contesto + export); pe
    produce "Talete / Talete mercante / Talete mercante prima...". Percio' tengo il testo PER
    INDICE e lo sovrascrivo: ogni segmento entra una volta sola, nella sua versione finale. */
 var gen = 0;             // numero dell'istanza di riconoscimento (gli indici ripartono a ogni riavvio)
-var segs = {};           // segs[gen][indice] = { text, sent, off }: testo del segmento, se gia' analizzato,
-                         //   e da quale carattere parte la parte nuova (se allungato dopo l'analisi)
+var segs = [];           // LISTA ORDINATA di segmenti { g, i, text, sent, off }: istanza, indice, testo,
+                         //   se gia' analizzato, da quale carattere parte la parte nuova.
+                         //   Lista e non mappa per indice: su Android una frase nuova arriva sullo STESSO
+                         //   indice della precedente, e la precedente, se non ancora analizzata, va tenuta.
+function liveSeg(g, i){  // l'ultimo segmento per (istanza, indice): e' quello che Chrome sta ancora aggiornando
+  for (var k = segs.length - 1; k >= 0; k--) if (segs[k].g === g && segs[k].i === i) return segs[k];
+  return null;
+}
 var seenLen = 0;         // indici visti nell'istanza corrente (serve a ORA per accodare il provvisorio)
 
 /* Su Android la frase successiva a una pausa RIUSA l'indice 0. Quindi non posso decidere
@@ -273,8 +295,10 @@ function commonPrefix(a, b){
   return n;
 }
 function isRevision(a, b){
-  var n = commonPrefix(a, b);
-  return n >= 3 && n >= Math.min(a.length, b.length) * 0.6;
+  var n = commonPrefix(a, b), m = Math.min(a.length, b.length);
+  if (n === m) return true;   // uno e' l'inizio dell'altro: e' sempre la stessa frase che cresce
+                              // (senza questo, "La" -> "La filosofia..." usciva come "La La filosofia...")
+  return n >= 3 && n >= m * 0.6;
 }
 var silenceT = null, wakeLock = null;
 var inflight = 0, MAX_INFLIGHT = 2;  // richieste in volo: nessuna blocca le altre, ma non piu' di due insieme
@@ -284,6 +308,43 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
+var VERSION = '2026-09-03a';
+
+/* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
+   la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
+var LOG = [];
+var T0 = Date.now();
+function log(ev, d){
+  LOG.push({ t: Date.now(), e: ev, d: d === undefined ? '' : d });
+  if (LOG.length > 300) LOG.shift();
+}
+function clock(ms){
+  var x = new Date(ms); var pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  return pad(x.getHours()) + ':' + pad(x.getMinutes()) + ':' + pad(x.getSeconds());
+}
+function logText(){
+  var lines = ['Gobbo ' + VERSION + ' · ' + navigator.userAgent, 'modello ' + C.model + ' / riserva ' + (C.fallback || '-') +
+    ' · pausa ' + C.pause + ' s · ogni ' + C.every + ' s · budget ' + C.budget + ' s · auto ' + C.auto + ' · fast ' + C.fast, ''];
+  for (var i = 0; i < LOG.length; i++) {
+    var l = LOG[i], d = (typeof l.d === 'object') ? JSON.stringify(l.d) : String(l.d);
+    lines.push(clock(l.t) + '  ' + l.e + (d ? '  ' + d : ''));
+  }
+  return lines.join('\n');
+}
+function diagSummary(){
+  return 'ascolto ' + (wantOn ? 'ON' : 'OFF') + (running ? ' (attivo)' : '') + ' · buffer ' + buf.trim().length + ' car.' +
+    ' · in volo ' + inflight + ' · schede ' + hist.length + ' · istanza #' + gen + ' · eventi ' + LOG.length;
+}
+/* Cintura di sicurezza: se per qualunque motivo il contatore delle richieste in volo resta
+   bloccato, dopo budget + 20 s lo azzero, altrimenti l'app rifiuterebbe ogni analisi per sempre. */
+var inflightSince = [];
+setInterval(function(){
+  var lim = (Math.max(5, C.budget || 20) + 20) * 1000;
+  if (inflight > 0 && inflightSince.length && Date.now() - inflightSince[0] > lim) {
+    log('watchdog', 'inflight bloccato a ' + inflight + ': azzero'); inflight = 0; inflightSince = []; dot.classList.remove('busy');
+  }
+  if (inflight === 0 && inflightSince.length) inflightSince = [];
+}, 5000);
 
 function $(id){ return document.getElementById(id); }
 var out = $('out'), dot = $('dot'), stat = $('status'), live = $('live');
@@ -380,6 +441,7 @@ function ask(testo, contesto){
     }, function(e){
       if (!isOverload(e)) throw e;                       // non temporaneo: fuori subito, insistere non aiuta
       errs.push(short(model) + ': ' + e.message);
+      log('tentativo.fallito', short(model) + ' ' + e.message);
       attempt++;
       var wait;
       if (e.retryAfter != null) wait = e.retryAfter * 1000;           // il provider sa meglio di me
@@ -556,7 +618,8 @@ out.addEventListener('click', function(e){
 function run(testo, contesto){
   if (inflight >= MAX_INFLIGHT || !testo.trim()) return;
   if (testo.trim().length < 15) { say('Troppo poco testo per analizzare.'); return; }
-  inflight++; dot.classList.add('busy');
+  inflight++; inflightSince.push(Date.now()); dot.classList.add('busy');
+  log('richiesta', { car: testo.trim().length, inVolo: inflight });
   say('Sto pensando…');
 
   ask(testo, contesto).then(function(r){
@@ -567,14 +630,16 @@ function run(testo, contesto){
       m: r.model || C.model,
       fb: !!r.fallback
     });
+    log('risposta', { modello: r.model, tentativi: r.attempts, filosofo: r.filosofo });
     if (r.filosofo) { usedPhilos.unshift(r.filosofo); usedPhilos = usedPhilos.slice(0, 4); }
     saveHist(); render();
     say((wantOn ? 'In ascolto…' : 'Pronto.') + (r.fallback ? ' Risposta da ' + short(r.model) + ' al tentativo ' + r.attempts + '.' : ''));
     if (navigator.vibrate) navigator.vibrate(35);
   }).catch(function(e){
+    log('errore', e.message);
     say(e.message, true);
   }).then(function(){
-    inflight--;
+    inflight--; inflightSince.shift();
     if (inflight <= 0) { inflight = 0; dot.classList.remove('busy'); }
   });
 }
@@ -586,16 +651,17 @@ function startRec(){
   if (!SR) { say('Questo browser non sa ascoltare. Usa Chrome su Android.', true); return; }
   if (running) return;
 
-  rec = new SR(); gen++; seenLen = 0;
+  rec = new SR(); gen++; seenLen = 0; log('sr.new', '#' + gen);
   rec.lang = 'it-IT';
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = function(){ running = true; dot.classList.add('on'); say('In ascolto… analizzo da solo a ogni pausa; ORA forza subito.'); };
+  rec.onstart = function(){ running = true; dot.classList.add('on'); log('sr.start'); say('In ascolto… analizzo da solo a ogni pausa; ORA forza subito.'); };
 
   rec.onresult = onResult;
 
   rec.onerror = function(e){
+    log('sr.error', e.error);
     if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
       say('Microfono negato. Autorizzalo nelle impostazioni del sito.', true);
       stopRec();
@@ -613,6 +679,7 @@ function startRec(){
     // Chrome chiude il riconoscimento da solo ogni tanto: lo riapro. Se e' caduta la rete
     // aspetto di piu, altrimenti si avvita in un ciclo di start/errore.
     var delay = lastErr === 'network' ? 2500 : 200;
+    log('sr.end', 'riavvio fra ' + delay + ' ms');
     lastErr = null;
     setTimeout(function(){ if (wantOn && !running) startRec(); }, delay);
   };
@@ -623,13 +690,12 @@ function startRec(){
 function onResult(e){
   var interim = '', gotFinal = false, n = e.results.length;
   if (n > seenLen) seenLen = n;
-  var cur = segs[gen] || (segs[gen] = []);
   for (var i = 0; i < n; i++) {
     var r = e.results[i], tx = (r[0] && r[0].transcript) || '';
     if (r.isFinal) {
-      var seg = cur[i], changed = false;
+      var seg = liveSeg(gen, i), changed = false;
       if (!seg) {
-        cur[i] = { text: tx, sent: false, off: 0 }; changed = true;
+        segs.push({ g: gen, i: i, text: tx, sent: false, off: 0 }); changed = true;
       } else if (seg.text === tx) {
         // riedizione identica: niente da fare
       } else if (isRevision(seg.text, tx)) {
@@ -638,14 +704,15 @@ function onResult(e){
           // dall'inizio della parola in cui divergono
           var k = commonPrefix(seg.text, tx);
           if (tx.charAt(k) !== ' ') while (k > 0 && tx.charAt(k - 1) !== ' ') k--;
-          cur[i] = { text: tx, sent: false, off: k };
+          segs.push({ g: gen, i: i, text: tx, sent: false, off: k });
         } else {
           seg.text = tx;
         }
         changed = true;
       } else {
-        // testo diverso allo stesso indice: frase nuova (Android riparte da 0 dopo una pausa)
-        cur[i] = { text: tx, sent: false, off: 0 }; changed = true;
+        // testo diverso allo stesso indice: frase NUOVA. La accodo: la precedente resta,
+        // analizzata o no (prima la sovrascrivevo e, se non era ancora partita, si perdeva).
+        segs.push({ g: gen, i: i, text: tx, sent: false, off: 0 }); changed = true;
       }
       if (changed) { gotFinal = true; if (!chunkStart) chunkStart = Date.now(); }
     } else {
@@ -655,6 +722,8 @@ function onResult(e){
   }
   if (gotFinal) buf = joinSegs();
   lastInterim = interim;
+  log('sr.result', { n: n, finale: gotFinal, buf: buf.trim().length, interim: interim.length });
+  if (/^In ascolto/.test(stat.textContent)) stat.textContent = 'In ascolto · ' + buf.trim().length + ' car.' + (inflight ? ' · ' + inflight + ' in volo' : '') + (C.auto ? '' : ' · automatico spento');
   live.classList.add('show');
   live.innerHTML = esc(buf.slice(-190)) + '<b>' + esc(interim) + '</b>';
   live.scrollLeft = live.scrollWidth;   // tiene in vista la coda, cioe le parole appena dette
@@ -664,6 +733,7 @@ function onResult(e){
   // C.every secondi - ma solo su un risultato finale, cioe a fine frase, per non tagliare a meta.
   var overdue = C.every > 0 && chunkStart && (Date.now() - chunkStart) >= C.every * 1000;
   if (gotFinal && overdue && buf.trim().length >= MIN_AUTO && inflight < MAX_INFLIGHT) {
+    log('innesco.ogni', buf.trim().length + ' car.');
     clearTimeout(silenceT);
     var t = buf.trim();
     run(t, takeBuffer());
@@ -686,9 +756,10 @@ function armSilence(){
   clearTimeout(silenceT);
   silenceT = setTimeout(function(){
     var t = buf.trim();
-    if (t.length < MIN_AUTO) return;
-    // una richiesta e gia in volo: riprovo fra poco invece di perdere il pezzo
-    if (inflight >= MAX_INFLIGHT) { armSilence(); return; }
+    if (t.length < MIN_AUTO) { log('pausa.sotto-soglia', t.length + '/' + MIN_AUTO + ' car.'); return; }
+    // due richieste gia' in volo: riprovo fra poco invece di perdere il pezzo
+    if (inflight >= MAX_INFLIGHT) { log('pausa.attesa', 'in volo ' + inflight); armSilence(); return; }
+    log('innesco.pausa', t.length + ' car.');
     var ctx = takeBuffer();
     run(t, ctx);
   }, Math.max(1000, C.pause * 1000));
@@ -696,13 +767,10 @@ function armSilence(){
 
 /* Ricompone il testo non ancora analizzato dai segmenti, in ordine di istanza e di indice. */
 function joinSegs(){
-  var out = [], gens = Object.keys(segs).map(Number).sort(function(a, b){ return a - b; });
-  for (var g = 0; g < gens.length; g++) {
-    var arr = segs[gens[g]];
-    for (var i = 0; i < arr.length; i++) {
-      var sg = arr[i]; if (!sg || sg.sent) continue;
-      var t = sg.text.slice(sg.off).trim(); if (t) out.push(t);
-    }
+  var out = [];
+  for (var k = 0; k < segs.length; k++) {
+    var sg = segs[k]; if (sg.sent) continue;
+    var t = sg.text.slice(sg.off).trim(); if (t) out.push(t);
   }
   return out.length ? out.join(' ') + ' ' : '';
 }
@@ -710,13 +778,17 @@ function joinSegs(){
 /* Sposta il buffer nella trascrizione analizzata e restituisce il testo detto PRIMA, come contesto. */
 function takeBuffer(){
   var ctx = full.slice(-700);
+  log('buffer.svuotato', buf.trim().length + ' car.');
   if (buf.trim()) { full += buf.trim() + ' '; saveFull(); }
   // segno come analizzati i segmenti dell'istanza corrente (li tengo per riconoscerne le
   // riedizioni); quelli di istanze morte non torneranno piu': via
-  for (var g in segs) {
-    if (Number(g) !== gen) { delete segs[g]; continue; }
-    var arr = segs[g]; for (var i = 0; i < arr.length; i++) if (arr[i]) arr[i].sent = true;
+  var keep = [], seen = {};
+  for (var k = segs.length - 1; k >= 0; k--) {
+    var sg = segs[k]; sg.sent = true;
+    var key = sg.g + ':' + sg.i;
+    if (sg.g === gen && !seen[key]) { seen[key] = 1; keep.unshift(sg); }   // l'ultimo per indice serve al confronto
   }
+  segs = keep;
   buf = ''; chunkStart = 0; lastInterim = '';
   live.innerHTML = '';
   live.classList.remove('show');   // libera spazio: mentre leggi la scheda la striscia sparisce
@@ -738,11 +810,12 @@ document.addEventListener('visibilitychange', function(){
 /* ============================ UI ============================ */
 $('mic').addEventListener('click', function(){
   if (wantOn) {
+    log('ferma');
     stopRec();
     say('Fermato. ' + (buf.trim() ? 'Premi ORA per analizzare l’ultimo pezzo.' : ''));
   } else {
     if (!C.key) { openSet(); say('Prima incolla la chiave API Gemini.', true); return; }
-    wantOn = true;
+    wantOn = true; log('ascolta');
     $('mic').classList.add('on');
     $('mic').innerHTML = '&#9632; FERMA';
     reqWake();
@@ -751,11 +824,12 @@ $('mic').addEventListener('click', function(){
 });
 
 $('now').addEventListener('click', function(){
+  log('ora', { buf: buf.trim().length, interim: lastInterim.trim().length, inVolo: inflight });
   if (inflight >= MAX_INFLIGHT) { say('Ho già due richieste in volo, un attimo…'); return; }
   if (lastInterim.trim()) {
     // Prendo anche le parole provvisorie (come segmento in coda) e riavvio l'ascolto:
     // cosi Chrome non me le rimanda come finali un secondo dopo, duplicandole.
-    (segs[gen] || (segs[gen] = []))[seenLen] = { text: lastInterim.trim(), sent: false, off: 0 }; seenLen++;
+    segs.push({ g: gen, i: seenLen, text: lastInterim.trim(), sent: false, off: 0 }); seenLen++;
     buf = joinSegs(); lastInterim = '';
     if (running && rec) { try { rec.abort(); } catch (_) {} }
   }
@@ -811,7 +885,7 @@ $('bSave').addEventListener('click', function(){
 });
 
 $('bClear').addEventListener('click', function(){
-  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; segs = {};
+  hist = []; usedPhilos = []; full = ''; buf = ''; chunkStart = 0; segs = [];
   saveHist(); saveFull(); render(); say('Storico e trascrizione svuotati.');
 });
 
@@ -836,6 +910,7 @@ function exportSession(){
     }
   }
   if (tr) md += '## Trascrizione completa\n\n' + tr + '\n';
+  md += '\n## Diagnostica\n\n' + diagSummary() + '\n\n```\n' + logText() + '\n```\n';
 
   var name = 'gobbo-' + stamp.replace(/[ :]/g, '-') + '.md';
   var file = new File([md], name, { type: 'text/markdown' });
@@ -853,6 +928,16 @@ function download(text, name){
   say('Esportato: ' + name);
 }
 $('bExport').addEventListener('click', exportSession);
+$('bDiag').addEventListener('click', function(){
+  $('diagSum').textContent = diagSummary();
+  var pre = $('diagLog'); pre.textContent = logText(); pre.scrollTop = pre.scrollHeight;
+  $('sDiag').classList.add('open');
+});
+$('bDiagClose').addEventListener('click', function(){ $('sDiag').classList.remove('open'); });
+$('bDiagCopy').addEventListener('click', function(){
+  var b = this;
+  navigator.clipboard.writeText(diagSummary() + '\n\n' + logText()).then(function(){ b.textContent = 'Copiato'; setTimeout(function(){ b.textContent = 'Copia tutto'; }, 1400); });
+});
 
 $('bWrite').addEventListener('click', function(){
   $('sWrite').classList.add('open');
@@ -875,7 +960,7 @@ for (var si = 0; si < sheets.length; si++) {
 }
 
 /* ============================ avvio ============================ */
-render();
+render(); log('avvio', VERSION);
 if (!SR) say('Riconoscimento vocale non disponibile: usa Chrome su Android. La modalità scrivi funziona comunque.', true);
 else if (!C.key) say('Apri le impostazioni e incolla la chiave API Gemini per iniziare.');
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
