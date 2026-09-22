@@ -37,5 +37,33 @@ return array(
        mentre il ponte sta gia' online. In produzione lascia l'elenco vuoto. */
     'origins' => array(),
 
-    'timeout' => 25,
+    /* Secondi di attesa verso OpenAI. Le schede dal palco rinunciano molto prima
+       (le taglia l'app); qui conta per gli articoli della modalita' giornalista. */
+    'timeout' => 90,
+
+    /* ---- Modalita' giornalista (giornale.php): archivio ed email ----
+       Questo stesso file configura anche giornale.php. Senza 'token' giornale.php
+       rifiuta tutto: scrive file e manda posta, non puo' restare aperto. */
+
+    /* Unico destinatario possibile: la pagina non puo' sceglierne un altro. */
+    'mail_to' => 'tu@tuodominio.it',
+
+    /* Mittente; vuoto = lo stesso utente SMTP. Con Gmail/Workspace deve essere
+       quell'indirizzo o un suo alias, altrimenti Google lo riscrive. */
+    'mail_from' => '',
+
+    /* Con Google Workspace: smtp.gmail.com, 465, ssl, l'indirizzo come utente e una
+       "password per le app" (myaccount.google.com/apppasswords, serve la verifica in
+       due passaggi), non la password normale. Con 587 usa 'secure' => 'tls'. */
+    'smtp' => array(
+        'host'   => 'smtp.gmail.com',
+        'port'   => 465,
+        'secure' => 'ssl',
+        'user'   => 'tu@tuodominio.it',
+        'pass'   => 'password-per-le-app',
+    ),
+
+    /* Dove finiscono le sessioni (un .md ciascuna). Vuoto = cartella "giornale" un
+       livello sopra giornale.php, cioe' fuori dal sito. Mai dentro la cartella pubblica. */
+    'archivio' => '',
 );

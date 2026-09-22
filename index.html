@@ -144,14 +144,34 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 .btn.sec{background:var(--panel);border:1px solid var(--line)}
 .btn:active{opacity:.8}
 .two{display:flex;gap:10px}.two>div{flex:1}
+
+/* ---------- modalita' giornalista ---------- */
+.ico.act{background:var(--amber);color:#151313}
+.brand em{font-style:normal;font-size:10px;letter-spacing:.14em;color:var(--dim);margin-left:8px;font-weight:700}
+.jnote{min-height:64px;margin-bottom:9px;font-size:14px}
+.jtx{background:var(--panel2);border-radius:12px;padding:10px 12px;font-size:15px;line-height:1.5;
+  max-height:45vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+.jtx.chiuso{max-height:7.5em}
+.jtx b{color:var(--dim);font-weight:400}
+.jtx:empty::before{content:'Ancora niente: premi ASCOLTA.';color:#6b7078}
+.b-a{border-left-color:var(--amber);margin-top:9px}
+.b-a h3{color:var(--amber)}
+.b-a .occ{font-size:12.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.b-a h4{margin:0 0 6px;font-size:19px;line-height:1.25}
+.b-a .som{font-weight:600;margin-bottom:9px}
+.b-a p{margin:0 0 9px}
+.jacts{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.jst{font-size:11px}
+.jst.ok{color:var(--green)} .jst.err{color:var(--red)}
 </style>
 </head>
 <body>
 
 <header>
   <div id="dot"></div>
-  <div class="brand">GOB<span>BO</span></div>
+  <div class="brand">GOB<span>BO</span><em id="modeTag"></em></div>
   <div class="sp"></div>
+  <button class="ico" id="bMode" title="Modalità giornalista">&#128240;</button>
   <button class="ico" id="bWrite" title="Scrivi un testo">&#9998;</button>
   <button class="ico" id="bSet" title="Impostazioni">&#9881;</button>
 </header>
@@ -226,6 +246,34 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
       Senza la tua chiave Gemini qui sopra non parte nulla, nemmeno questa: il ponte non è a disposizione
       di chi capita sull’indirizzo dell’app.</div>
 
+    <label>Giornalista &mdash; archivio ed email sul server</label>
+    <div class="two" style="align-items:stretch">
+      <div><input type="text" id="fGUrl" placeholder="./giornale.php" autocomplete="off" spellcheck="false"></div>
+      <button class="btn sec" id="bGCheck" style="flex:0 0 auto;height:auto;padding:0 16px">Verifica</button>
+    </div>
+    <div class="hint" id="gMsg">Nella modalità giornalista (&#128240;) ogni sessione viene salvata sul server, fuori dal sito,
+      e mandata per email all’indirizzo scritto nella configurazione del server: la pagina non può sceglierne un altro.
+      Usa la stessa parola d’ordine del ponte, qui sopra. Vuoto = le sessioni restano solo su questo telefono.</div>
+    <div class="two">
+      <div>
+        <label>Modello per l’articolo</label>
+        <select id="fAModel">
+          <option value="">(come la riserva)</option>
+          <option value="gemini-3.7-flash">gemini-3.7-flash</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash</option>
+        </select>
+      </div>
+      <div>
+        <label>Lunghezza</label>
+        <select id="fALen">
+          <option value="2500">breve (~2.500 battute)</option>
+          <option value="4000">media (~4.000)</option>
+          <option value="6000">lunga (~6.000)</option>
+        </select>
+      </div>
+    </div>
+    <div class="row"><input type="checkbox" id="fAMail"><label for="fAMail">Manda per email quando l’articolo è pronto</label></div>
+
     <div class="two">
       <div>
         <label>Pausa (sec)</label>
@@ -276,7 +324,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 <!-- scrittura manuale -->
 <div class="sheet" id="sWrite">
   <div class="card">
-    <h2>Scrivi il testo</h2>
+    <h2 id="wTitle">Scrivi il testo</h2>
     <textarea id="fText" placeholder="Incolla o scrivi qui quello che vuoi far analizzare..."></textarea>
     <div class="acts">
       <button class="btn sec" id="bCancel">Annulla</button>
@@ -290,9 +338,15 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 var LS = 'gobbo.v1';
 var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash',
          oproxy:'', otoken:'', fallback2:'gpt-5-mini', omodels:[],
-         pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[]};
+         pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[],
+         mode:'gobbo', gurl:'', amodel:'', alen:4000, amail:true};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
+/* Sessioni della modalita' giornalista, dalla piu' recente. Ciascuna:
+   {id, inizio, fine, agg, testo, note, articolo:{titolo,occhiello,sommario,testo,modello,t}|null,
+    srv:{salvato, inviato, err}} - 'agg' e 'srv.salvato' dicono se il server ha l'ultima versione. */
+var J = JSON.parse(localStorage.getItem(LS + '.giornale') || '[]');
+var jId = '', jBase = '';   // sessione che sto registrando, e il suo testo prima di questo ascolto
 
 var rec = null, running = false, wantOn = false;
 var buf = '';          // testo non ancora analizzato, ricomposto dal flusso dei risultati definitivi
@@ -341,7 +395,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-03f';
+var VERSION = '2026-09-22a';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -366,7 +420,7 @@ function logText(){
   return lines.join('\n');
 }
 function diagSummary(){
-  return 'ascolto ' + (wantOn ? 'ON' : 'OFF') + (running ? ' (attivo)' : '') + ' · buffer ' + buf.trim().length + ' car.' +
+  return 'modalita ' + C.mode + ' · sessioni ' + J.length + ' · ascolto ' + (wantOn ? 'ON' : 'OFF') + (running ? ' (attivo)' : '') + ' · buffer ' + buf.trim().length + ' car.' +
     ' · in volo ' + inflight + ' · schede ' + hist.length + ' · in corso ' + curFinal.length + '/chiuse ' + chunkText.length + '/analizzata ' + sentFinal.length + ' car. · eventi ' + LOG.length;
 }
 /* Cintura di sicurezza: se per qualunque motivo il contatore delle richieste in volo resta
@@ -470,22 +524,40 @@ function fmtS(ms){ return (ms / 1000).toFixed(1).replace('.', ',') + ' s'; }
    - budget in SECONDI, non in tentativi: scaduto, rinuncio a questo pezzo e la vita continua;
    - attesa crescente con tetto e fattore casuale 0,7-1,3, alternando principale e riserva;
    - Retry-After ha la precedenza; se chiede piu' del budget residuo, mi arrendo subito. */
-function ask(testo, contesto){
+/* Le due richieste che l'app sa fare. Stessa catena di modelli e stesse regole di
+   ritentativo; cambiano istruzioni, schema, tempi. La scheda dal palco deve arrivare in
+   pochi secondi o non serve piu'; l'articolo puo' metterci un minuto, ma deve arrivare. */
+function optGobbo(){
+  return { name: 'gobbo', sys: SYS, schema: SCHEMA, oschema: OSCHEMA, temp: 1.0, fast: C.fast,
+           models: [C.model, C.fallback, C.fallback2],
+           budget: Math.max(5, C.budget || 20) * 1000, first: 10000, per: 12000, post: normPunti };
+}
+function optArticolo(){
+  return { name: 'articolo', sys: SYS_ART, schema: ASCHEMA, oschema: AOSCHEMA, temp: 0.7, fast: false,
+           models: [C.amodel || C.fallback || C.model, C.model, C.fallback, C.fallback2],
+           budget: 240000, first: 120000, per: 120000 };
+}
+function normPunti(o){
+  if (!Array.isArray(o.punti)) o.punti = [String(o.punti || '')];
+  o.punti = o.punti.filter(Boolean).slice(0, 3);
+  return o;
+}
+
+function ask(u, opt){
   /* La chiave Gemini e' il biglietto d'ingresso, e vale per tutta la catena: senza,
      non parte niente - nemmeno il ponte OpenAI, che costa e sta su un indirizzo pubblico.
      Chi apre l'app senza portarsi la propria chiave non arriva a spendere il credito altrui. */
   if (!C.key) return Promise.reject(new Error('Manca la chiave API: aprila con l’ingranaggio'));
-  var u = buildPrompt(testo, contesto);
   /* La catena: principale -> riserva -> seconda riserva (OpenAI). Il terzo anello serve
      proprio quando Google e' in ginocchio del tutto: cambiare modello dentro Gemini non
      aiuta se e' il servizio a essere saturo, cambiare fornitore si'. Senza la sua chiave
      l'anello viene semplicemente saltato, senza errori. */
   var models = [];
-  [C.model, C.fallback, C.fallback2].forEach(function(m){
+  opt.models.forEach(function(m){
     if (m && models.indexOf(m) < 0 && keyFor(m)) models.push(m);
   });
   if (!models.length) return Promise.reject(new Error('Nessun modello utilizzabile: controlla modello e chiave nelle impostazioni'));
-  var budgetMs = Math.max(5, C.budget || 20) * 1000, t0 = Date.now(), attempt = 0, errs = [];
+  var budgetMs = opt.budget, t0 = Date.now(), attempt = 0, errs = [];
   function remaining(){ return budgetMs - (Date.now() - t0); }
   function giveUp(extra){
     return new Error('Niente risposta entro ' + Math.round(budgetMs / 1000) + ' s' + (extra || '') +
@@ -495,8 +567,9 @@ function ask(testo, contesto){
     var model = models[attempt % models.length];
     var rem = remaining();
     if (rem < 1500) return Promise.reject(giveUp());
-    var perTry = Math.min(attempt === 0 ? 10000 : 12000, rem);
-    return askModel(model, u, perTry).then(function(o){
+    var perTry = Math.min(attempt === 0 ? opt.first : opt.per, rem);
+    return askModel(model, u, perTry, opt).then(function(o){
+      if (opt.post) o = opt.post(o);
       o.model = model; o.fallback = attempt > 0; o.attempts = attempt + 1;
       return o;
     }, function(e){
@@ -517,13 +590,13 @@ function ask(testo, contesto){
   return tryOnce();
 }
 
-function askModel(model, u, timeoutMs){
-  return provider(model) === 'openai' ? askOpenAI(model, u, timeoutMs) : askGemini(model, u, timeoutMs);
+function askModel(model, u, timeoutMs, opt){
+  return provider(model) === 'openai' ? askOpenAI(model, u, timeoutMs, opt) : askGemini(model, u, timeoutMs, opt);
 }
 
-function askGemini(model, u, timeoutMs){
-  var gc = { responseMimeType: 'application/json', responseSchema: SCHEMA, temperature: 1.0 };
-  if (C.fast) { var tc = fastThinking(model); if (tc) gc.thinkingConfig = tc; }
+function askGemini(model, u, timeoutMs, opt){
+  var gc = { responseMimeType: 'application/json', responseSchema: opt.schema, temperature: opt.temp };
+  if (opt.fast) { var tc = fastThinking(model); if (tc) gc.thinkingConfig = tc; }
 
   var ctrl = new AbortController();
   var to = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
@@ -534,7 +607,7 @@ function askGemini(model, u, timeoutMs){
     headers: { 'Content-Type': 'application/json', 'x-goog-api-key': C.key },
     signal: ctrl.signal,
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYS }] },
+      systemInstruction: { parts: [{ text: opt.sys }] },
       contents: [{ role: 'user', parts: [{ text: u }] }],
       generationConfig: gc
     })
@@ -565,10 +638,7 @@ function askGemini(model, u, timeoutMs){
     if (!parts || !parts[0] || !parts[0].text) {
       throw new Error('Risposta vuota (' + (cand.finishReason || 'nessun contenuto') + ')');
     }
-    var o = JSON.parse(parts[0].text);
-    if (!Array.isArray(o.punti)) o.punti = [String(o.punti || '')];
-    o.punti = o.punti.filter(Boolean).slice(0, 3);
-    return o;
+    return JSON.parse(parts[0].text);
   });
 }
 
@@ -591,7 +661,46 @@ var OSCHEMA = {
   additionalProperties: false
 };
 
-function askOpenAI(model, u, timeoutMs){
+/* ============================ articolo (modalita' giornalista) ============================ */
+var SYS_ART = [
+'Sei un giornalista professionista italiano. Ricevi la trascrizione automatica di un intervento, un incontro o un’intervista, registrata dal vivo con il riconoscimento vocale del telefono: contiene errori di riconoscimento, parole storpiate, punteggiatura assente o sbagliata, e non distingue chi sta parlando.',
+'Scrivi un articolo giornalistico in italiano basato SOLO su quella trascrizione e sulle note del giornalista.',
+'',
+'Fedeltà prima di tutto:',
+'- solo fatti, nomi, cifre e affermazioni che compaiono nella trascrizione o nelle note. Non aggiungere contesto, dati o dichiarazioni che non ci sono;',
+'- se un nome, un numero o un termine è evidentemente storpiato dal riconoscimento vocale e non sei sicuro di come correggerlo, resta generico o omettilo: non indovinare;',
+'- virgolettati solo per frasi pronunciate davvero, ripulite il minimo indispensabile (errori di trascrizione, intercalari, ripetizioni) senza cambiarne il senso. Attribuiscili solo se chi parla è chiaro dal testo o dalle note; altrimenti riporta in forma indiretta.',
+'',
+'Forma:',
+'- titolo informativo, non urlato; occhiello breve; sommario di una o due frasi;',
+'- attacco forte che dica subito la notizia (chi, cosa, dove, quando, perché, se ricavabili), poi piramide rovesciata, paragrafi brevi;',
+'- registro da quotidiano: neutro, preciso, niente enfasi promozionale, niente giudizi tuoi, niente frasi di chiusura retoriche;',
+'- nel campo testo separa i paragrafi con una riga vuota, senza titoletti né markdown.'
+].join('\n');
+
+var ASCHEMA = {
+  type: "object",
+  properties: {
+    titolo:    { type: "string" },
+    occhiello: { type: "string" },
+    sommario:  { type: "string" },
+    testo:     { type: "string" }
+  },
+  required: ["titolo", "occhiello", "sommario", "testo"]
+};
+var AOSCHEMA = JSON.parse(JSON.stringify(ASCHEMA));
+AOSCHEMA.additionalProperties = false;
+
+function buildArtPrompt(s){
+  var u = '';
+  if ((s.note || '').trim()) u += 'NOTE DEL GIORNALISTA (chi parla, dove, per chi scrivo, che taglio):\n' + s.note.trim() + '\n\n';
+  u += 'DATA DELLA REGISTRAZIONE: ' + new Date(s.inizio).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '\n';
+  u += 'LUNGHEZZA DELL’ARTICOLO: circa ' + C.alen + ' battute, spazi inclusi.\n\n';
+  u += 'TRASCRIZIONE:\n"""' + s.testo.trim() + '"""';
+  return u;
+}
+
+function askOpenAI(model, u, timeoutMs, opt){
   /* Seconda serratura, sulla porta invece che sul cancello: il ponte non si apre
      a chi non ha la sua chiave Gemini, per qualunque strada ci arrivi. */
   if (!C.key) { var ge = new Error('serve prima la tua chiave Gemini'); ge.fatal = true; return Promise.reject(ge); }
@@ -599,12 +708,12 @@ function askOpenAI(model, u, timeoutMs){
 
   var body = {
     model: model,
-    messages: [{ role: 'system', content: SYS }, { role: 'user', content: u }],
-    response_format: { type: 'json_schema', json_schema: { name: 'gobbo', strict: true, schema: OSCHEMA } }
+    messages: [{ role: 'system', content: opt.sys }, { role: 'user', content: u }],
+    response_format: { type: 'json_schema', json_schema: { name: opt.name, strict: true, schema: opt.oschema } }
   };
   /* Modalita' veloce: sui gpt-5 il ragionamento si riduce con reasoning_effort.
      Gli altri (4o/4.1) non hanno la voce, e ometterla e' meglio che farsi rifiutare la richiesta. */
-  if (C.fast && /^gpt-5/i.test(model)) body.reasoning_effort = 'minimal';
+  if (opt.fast && /^gpt-5/i.test(model)) body.reasoning_effort = 'minimal';
 
   var ctrl = new AbortController();
   var to = setTimeout(function(){ ctrl.abort(); }, timeoutMs);
@@ -651,10 +760,7 @@ function askOpenAI(model, u, timeoutMs){
     var msg = (((j.choices || [])[0] || {}).message) || {};
     if (msg.refusal) throw new Error('OpenAI ha rifiutato: ' + msg.refusal);
     if (!msg.content) throw new Error('Risposta vuota (' + (((j.choices || [])[0] || {}).finish_reason || 'nessun contenuto') + ')');
-    var o = JSON.parse(msg.content);
-    if (!Array.isArray(o.punti)) o.punti = [String(o.punti || '')];
-    o.punti = o.punti.filter(Boolean).slice(0, 3);
-    return o;
+    return JSON.parse(msg.content);
   });
 }
 
@@ -745,11 +851,12 @@ function fillModels(ids){
   });
   fillSelect($('fModel'), ids, false);
   fillSelect($('fFallback'), ids, true);
+  fillSelect($('fAModel'), ids, '(come la riserva)');
 }
 function fillSelect(sel, ids, withNone){
   var cur = sel.value;
   sel.innerHTML = '';
-  if (withNone) { var z = document.createElement('option'); z.value = ''; z.textContent = '(nessuno)'; sel.appendChild(z); }
+  if (withNone) { var z = document.createElement('option'); z.value = ''; z.textContent = typeof withNone === 'string' ? withNone : '(nessuno)'; sel.appendChild(z); }
   for (var i = 0; i < ids.length; i++) {
     var o = document.createElement('option'); o.value = ids[i]; o.textContent = ids[i]; sel.appendChild(o);
   }
@@ -771,6 +878,7 @@ var EMPTY = '<div class="empty"><span class="big">&#127908;</span>' +
   'Oppure premi la matita e scrivi tu il testo.</div>';
 
 function render(){
+  if (C.mode === 'giornalista') { renderJ(); return; }
   if (!hist.length) { out.innerHTML = EMPTY; return; }
   var html = '';
   for (var i = 0; i < hist.length; i++) {
@@ -810,6 +918,245 @@ out.addEventListener('click', function(e){
   }).catch(function(){ say('Copia non riuscita', true); });
 });
 
+/* ============================ modalita' giornalista ============================
+   Niente suggerimenti: il microfono trascrive e basta, la sessione cresce e si salva da
+   sola (sul telefono a ogni frase, sul server al massimo ogni minuto). Alla fine ARTICOLO
+   manda tutta la trascrizione a Gemini e, se c'e' il server, la spedisce per email. */
+function saveJ(){
+  if (J.length > 40) J = J.slice(0, 40);
+  try { localStorage.setItem(LS + '.giornale', JSON.stringify(J)); }
+  catch (e) { log('giornale.pieno', e.message); say('Memoria del telefono piena: elimina qualche sessione vecchia.', true); }
+}
+function joinT(a, b){ a = (a || '').trim(); b = (b || '').trim(); return a && b ? a + ' ' + b : (a || b); }
+function jFind(id){ for (var i = 0; i < J.length; i++) if (J[i].id === id) return J[i]; return null; }
+function jCur(){ return jFind(jId) || J[0] || null; }
+function jNew(){
+  var d = new Date(), pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  var s = { id: d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) +
+                '-' + Math.random().toString(36).slice(2, 6),
+            inizio: d.getTime(), fine: d.getTime(), agg: d.getTime(), testo: '', note: '', articolo: null,
+            srv: { salvato: 0, inviato: 0, err: '' } };
+  J.unshift(s); saveJ();
+  log('giornale.nuova', s.id);
+  return s;
+}
+function parole(t){ t = (t || '').trim(); return t ? t.split(/\s+/).length : 0; }
+function oraBreve(ms){ return new Date(ms).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+
+function jMeta(s){
+  var st = '', cls = '';
+  if (s.srv.busy) st = s.srv.busy === 'invia' ? 'invio…' : 'salvo…';
+  else if (s.srv.err) { st = '⚠ ' + s.srv.err; cls = 'err'; }
+  else if (s.srv.inviato && s.srv.inviato >= s.agg) { st = '✉ inviata'; cls = 'ok'; }
+  else if (s.srv.salvato && s.srv.salvato >= s.agg) { st = '✓ sul server'; cls = 'ok'; }
+  else if (C.gurl && s.testo) st = 'da salvare sul server';
+  return '<span>' + oraBreve(s.inizio) + (s.fine - s.inizio > 60000 ? ' – ' + new Date(s.fine).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '') +
+         ' · ' + parole(s.testo) + ' parole</span><span class="sp"></span><span class="jst ' + cls + '">' + esc(st) + '</span>';
+}
+function updateMeta(s){ var el = $('jm-' + s.id); if (el) el.innerHTML = jMeta(s); }
+
+function artHtml(a){
+  var ps = String(a.testo || '').split(/\n\s*\n/).filter(function(p){ return p.trim(); })
+             .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
+  return '<section class="blk b-a"><h3>Articolo &mdash; ' + esc(short(a.modello || '')) + '</h3>' +
+    (a.occhiello ? '<div class="occ">' + esc(a.occhiello) + '</div>' : '') +
+    '<h4>' + esc(a.titolo) + '</h4>' +
+    (a.sommario ? '<p class="som">' + esc(a.sommario) + '</p>' : '') + ps + '</section>';
+}
+
+var EMPTY_J = '<div class="empty"><span class="big">&#128240;</span>' +
+  'Modalità giornalista: premi ASCOLTA e trascrivo tutto quello che viene detto, senza suggerimenti.<br><br>' +
+  'Alla fine <b style="color:var(--amber)">ARTICOLO</b> manda la trascrizione a Gemini e ne ricava un pezzo giornalistico.<br><br>' +
+  'Scrivi prima due righe di note (chi parla, dove, per chi scrivi): l’articolo viene molto meglio.</div>';
+
+function renderJ(){
+  if (!J.length) jNew();
+  var html = '';
+  for (var i = 0; i < J.length; i++) {
+    var s = J[i], rec0 = wantOn && s.id === jId;
+    if (i > 0 && !s.testo && !s.articolo) continue;   // sessioni rimaste vuote: non ingombrano
+    html +=
+      '<article class="res' + (i === 0 ? ' fresh' : '') + '">' +
+        '<div class="rhead" id="jm-' + s.id + '">' + jMeta(s) + '</div>' +
+        (i === 0 ? '<textarea class="jnote" data-note="' + s.id + '" placeholder="Note per l’articolo: chi parla, evento, luogo, testata, taglio…">' + esc(s.note) + '</textarea>'
+                 : (s.note ? '<div class="hint" style="margin:0 0 8px">' + esc(s.note) + '</div>' : '')) +
+        '<div class="jtx' + (i === 0 ? '' : ' chiuso') + '" id="jt-' + s.id + '">' + esc(s.testo) + '</div>' +
+        (s.articolo ? artHtml(s.articolo) : '') +
+        '<div class="jacts">' +
+          (i > 0 ? '<button class="mini" data-j="apri" data-id="' + s.id + '">Espandi</button>' : '') +
+          '<button class="mini" data-j="copia" data-id="' + s.id + '">Copia</button>' +
+          (C.gurl ? '<button class="mini" data-j="invia" data-id="' + s.id + '">Email</button>' : '') +
+          (i > 0 && !rec0 ? '<button class="mini" data-j="art" data-id="' + s.id + '">' + (s.articolo ? 'Riscrivi articolo' : 'Articolo') + '</button>' : '') +
+          (i === 0 && !rec0 && (s.testo || s.articolo) ? '<button class="mini" data-j="nuova" data-id="' + s.id + '">Nuova sessione</button>' : '') +
+          (!rec0 ? '<button class="mini" data-j="elimina" data-id="' + s.id + '">Elimina</button>' : '') +
+        '</div>' +
+      '</article>';
+  }
+  out.innerHTML = (J.length === 1 && !J[0].testo && !J[0].articolo ? EMPTY_J : '') + html;
+  var t = J[0] && $('jt-' + J[0].id); if (t) t.scrollTop = t.scrollHeight;
+}
+
+out.addEventListener('input', function(e){
+  var id = e.target.getAttribute && e.target.getAttribute('data-note');
+  if (!id) return;
+  var s = jFind(id); if (!s) return;
+  s.note = e.target.value; s.agg = Date.now(); saveJ(); jSchedule(); updateMeta(s);
+});
+
+out.addEventListener('click', function(e){
+  var b = e.target.closest('[data-j]');
+  if (!b) return;
+  var s = jFind(b.getAttribute('data-id')), az = b.getAttribute('data-j');
+  if (!s) return;
+  if (az === 'apri') {
+    var t = $('jt-' + s.id); t.classList.toggle('chiuso');
+    b.textContent = t.classList.contains('chiuso') ? 'Espandi' : 'Riduci';
+  } else if (az === 'copia') {
+    navigator.clipboard.writeText(jPlain(s)).then(function(){
+      b.textContent = 'Copiato'; setTimeout(function(){ b.textContent = 'Copia'; }, 1400);
+    }).catch(function(){ say('Copia non riuscita', true); });
+  } else if (az === 'invia') {
+    jServer('invia', s);
+  } else if (az === 'art') {
+    writeArticle(s);
+  } else if (az === 'nuova') {
+    jNew(); jId = ''; render(); say('Nuova sessione: scrivi le note e premi ASCOLTA.');
+  } else if (az === 'elimina') {
+    if (!confirm('Eliminare questa sessione dal telefono?' + (s.srv.salvato ? ' La copia sul server resta.' : ' Non è salvata altrove.'))) return;
+    J = J.filter(function(x){ return x !== s; }); saveJ(); render();
+  }
+});
+
+function jPlain(s){
+  var t = '';
+  if (s.articolo) {
+    var a = s.articolo;
+    t += (a.occhiello ? a.occhiello + '\n\n' : '') + a.titolo + '\n\n' + (a.sommario ? a.sommario + '\n\n' : '') + a.testo + '\n\n----\n\n';
+  }
+  if (s.note) t += 'NOTE\n' + s.note + '\n\n';
+  return t + 'TRASCRIZIONE (' + oraBreve(s.inizio) + ')\n\n' + s.testo;
+}
+
+/* Ogni frase finale arriva qui: aggiorno la sessione e solo il suo riquadro,
+   senza ridisegnare la pagina (si perderebbe il cursore nelle note). */
+function jLive(gotFinal){
+  var s = jCur(); if (!s) return;
+  s.testo = joinT(jBase, buf); s.fine = s.agg = Date.now();
+  if (gotFinal) { saveJ(); jSchedule(); }
+  var el = $('jt-' + s.id);
+  if (el) {
+    el.innerHTML = esc(s.testo) + (lastInterim.trim() ? ' <b>' + esc(lastInterim.trim()) + '</b>' : '');
+    el.scrollTop = el.scrollHeight;
+  }
+  updateMeta(s);
+  say('Registro · ' + parole(s.testo) + ' parole');
+}
+
+function jStart(){
+  var s = J[0];
+  if (!s || s.articolo) s = jNew();   // con l'articolo gia' scritto la sessione e' chiusa: ne apro un'altra
+  jId = s.id; jBase = s.testo;
+  chunkText = ''; curFinal = ''; sentFinal = ''; buf = ''; lastInterim = ''; chunkStart = 0;
+  if (!s.testo) s.inizio = Date.now();
+  log('giornale.ascolto', { id: s.id, car: s.testo.length });
+}
+
+/* Alla fine tengo anche le parole ancora provvisorie: fermandosi, Chrome spesso non le
+   conferma piu', e sono proprio le ultime dette. */
+function jStop(){
+  var s = jCur(); if (!s) return;
+  s.testo = joinT(jBase, joinT(buf, lastInterim)); s.fine = s.agg = Date.now();
+  saveJ(); render();
+  say('Fermato: ' + parole(s.testo) + ' parole salvate' + (C.gurl ? '' : ' sul telefono') + '. ARTICOLO per scriverne il pezzo.');
+  jServer('salva', s);
+}
+
+var jSaveT = null;
+function jSchedule(){
+  if (jSaveT || !C.gurl) return;
+  jSaveT = setTimeout(function(){ jSaveT = null; var s = jCur(); if (s && s.testo) jServer('salva', s); }, 60000);
+}
+
+/* Salva (e se azione e' 'invia' spedisce) la sessione con giornale.php. Non lancia mai:
+   l'esito finisce nella sessione e sulla sua scheda, cosi' un server giu' non ferma niente. */
+function jServer(azione, s){
+  if (!C.gurl) { if (azione === 'invia') say('Per l’email serve giornale.php: indirizzo nelle impostazioni.', true); return Promise.resolve(false); }
+  if (!C.otoken) { s.srv.err = 'manca la parola d’ordine nelle impostazioni'; updateMeta(s); return Promise.resolve(false); }
+  var versione = s.agg;
+  s.srv.busy = azione; updateMeta(s);
+  log('giornale.' + azione, { id: s.id, car: s.testo.length });
+  return fetch(C.gurl, {
+    method: 'POST', headers: proxyHeaders(true),
+    body: JSON.stringify({ azione: azione, sessione: { id: s.id, inizio: s.inizio, fine: s.fine, note: s.note, testo: s.testo, articolo: s.articolo } })
+  }).then(function(r){ return r.json().catch(function(){ return null; }).then(function(j){ return { r: r, j: j }; }); })
+    .then(function(x){
+      if (!x.j) throw new Error('il server non risponde (HTTP ' + x.r.status + '): giornale.php non caricato?');
+      var code = (x.j.error && x.j.error.code) || '';
+      if (code === 'gobbo_no_mail' || code === 'gobbo_smtp') s.srv.salvato = versione;   // il file e' scritto, e' la posta che manca
+      if (!x.r.ok || x.j.ok === false) throw new Error((x.j.error && x.j.error.message) || ('HTTP ' + x.r.status));
+      s.srv.salvato = versione; s.srv.err = '';
+      if (x.j.inviato) s.srv.inviato = versione;
+      log('giornale.ok', { id: s.id, azione: azione, inviato: !!x.j.inviato });
+      if (x.j.inviato) say('Inviata per email a ' + (x.j.a || 'te') + '.');
+      return true;
+    })
+    .catch(function(e){
+      s.srv.err = e.message;
+      log('giornale.errore', { id: s.id, azione: azione, errore: e.message });
+      if (azione === 'invia') say(e.message, true);
+      return false;
+    })
+    .then(function(ok){ s.srv.busy = ''; saveJ(); updateMeta(s); return ok; });
+}
+
+var writing = false;
+function writeArticle(s){
+  if (writing) { say('Sto già scrivendo un articolo, un attimo…'); return; }
+  if (!C.key) { openSet(); say('Per l’articolo serve la chiave API Gemini.', true); return; }
+  if (parole(s.testo) < 40) { say('Troppo poco testo per un articolo: registra ancora un po’.', true); return; }
+  if (s.articolo && !confirm('Questa sessione ha già un articolo. Riscriverlo?')) return;
+  writing = true; dot.classList.add('busy');
+  say('Scrivo l’articolo da ' + parole(s.testo) + ' parole… può volerci un minuto.');
+  log('articolo.richiesta', { id: s.id, car: s.testo.length });
+  ask(buildArtPrompt(s), optArticolo()).then(function(a){
+    s.articolo = { titolo: a.titolo || '', occhiello: a.occhiello || '', sommario: a.sommario || '', testo: a.testo || '',
+                   modello: a.model, t: Date.now() };
+    s.agg = Date.now(); saveJ(); render();
+    log('articolo.ok', { id: s.id, modello: a.model, tentativi: a.attempts });
+    say('Articolo pronto (' + short(a.model) + ')' + (C.gurl && C.amail ? ': lo invio per email…' : '.'));
+    if (navigator.vibrate) navigator.vibrate(35);
+    return jServer(C.gurl && C.amail ? 'invia' : 'salva', s);
+  }).catch(function(e){
+    log('articolo.errore', e.message);
+    say('Articolo non riuscito: ' + e.message, true);
+  }).then(function(){ writing = false; if (!inflight) dot.classList.remove('busy'); });
+}
+
+function checkG(){
+  var url = $('fGUrl').value.trim(), msg = $('gMsg'), tok = $('fOToken').value.trim();
+  if (!url) { msg.textContent = 'Scrivi prima l’indirizzo (di solito ./giornale.php).'; return; }
+  if (!tok) { msg.textContent = 'Serve la parola d’ordine del ponte, qui sopra: è la stessa.'; return; }
+  msg.textContent = 'Provo il server…';
+  fetch(url, { headers: { 'X-Gobbo-Token': tok } })
+    .then(function(r){ return r.json().catch(function(){ return null; }).then(function(j){ return { r: r, j: j }; }); })
+    .then(function(x){
+      if (!x.j) throw new Error('nessuna risposta JSON (HTTP ' + x.r.status + '): giornale.php caricato, e il PHP gira?');
+      if (!x.r.ok || x.j.ok === false) throw new Error((x.j.error && x.j.error.message) || ('HTTP ' + x.r.status));
+      msg.textContent = (x.j.archivio ? 'Archivio pronto, fuori dal sito.' : 'Attenzione: l’archivio risulta dentro il sito.') + ' ' +
+        (x.j.email ? 'Email attiva, verso ' + x.j.a + '.' : 'Email non ancora configurata sul server (mail_to e smtp): per ora solo archivio.');
+    })
+    .catch(function(e){ msg.textContent = 'Server non raggiungibile: ' + e.message; });
+}
+
+function applyMode(){
+  var g = C.mode === 'giornalista';
+  $('bMode').classList.toggle('act', g);
+  $('modeTag').textContent = g ? 'GIORNALISTA' : '';
+  $('now').textContent = g ? 'ARTICOLO' : 'ORA';
+  live.classList.remove('show'); live.innerHTML = '';
+  render();
+}
+
 /* ============================ analisi ============================ */
 function run(testo, contesto){
   if (inflight >= MAX_INFLIGHT || !testo.trim()) return;
@@ -818,7 +1165,7 @@ function run(testo, contesto){
   log('richiesta', { car: testo.trim().length, inVolo: inflight });
   say('Sto pensando…');
 
-  ask(testo, contesto).then(function(r){
+  ask(buildPrompt(testo, contesto), optGobbo()).then(function(r){
     hist.unshift({
       t: new Date().toLocaleTimeString('it-IT', {hour:'2-digit', minute:'2-digit', second:'2-digit'}),
       r: r,
@@ -852,7 +1199,9 @@ function startRec(){
   rec.continuous = true;
   rec.interimResults = true;
 
-  rec.onstart = function(){ running = true; dot.classList.add('on'); log('sr.start'); say('In ascolto… analizzo da solo a ogni pausa; ORA forza subito.'); };
+  rec.onstart = function(){ running = true; dot.classList.add('on'); log('sr.start');
+    if (C.mode === 'giornalista') { var s = jCur(); say('Registro · ' + parole(s ? s.testo : '') + ' parole'); }
+    else say('In ascolto… analizzo da solo a ogni pausa; ORA forza subito.'); };
 
   rec.onresult = onResult;
 
@@ -908,6 +1257,7 @@ function onResult(e){
   buf = (chunkText + stripSent(curFinal)).replace(/\s+/g, ' ').replace(/^ /, '');
   if (buf && buf.charAt(buf.length - 1) !== ' ') buf += ' ';
   lastInterim = interim;
+  if (C.mode === 'giornalista') { if (gotFinal) log('sr.result', { n: n, car: buf.length }); jLive(gotFinal); return; }
   if (gotFinal) saveFull();
 
   log('sr.result', { n: n, finale: gotFinal, buf: buf.trim().length, interim: interim.length });
@@ -932,7 +1282,9 @@ function onResult(e){
 }
 
 function stopRec(){
+  var era = wantOn;
   wantOn = false; running = false;
+  if (era && C.mode === 'giornalista') jStop();
   dot.classList.remove('on');
   if (rec) { try { rec.onend = null; rec.stop(); } catch (_) {} }
   $('mic').classList.remove('on');
@@ -984,10 +1336,13 @@ $('mic').addEventListener('click', function(){
   if (wantOn) {
     log('ferma');
     stopRec();
-    say('Fermato. ' + (buf.trim() ? 'Premi ORA per analizzare l’ultimo pezzo.' : ''));
+    if (C.mode !== 'giornalista') say('Fermato. ' + (buf.trim() ? 'Premi ORA per analizzare l’ultimo pezzo.' : ''));
   } else {
-    if (!C.key) { openSet(); say('Prima incolla la chiave API Gemini.', true); return; }
+    /* Per trascrivere non serve Gemini: la chiave la chiedo solo quando si scrive l'articolo. */
+    if (C.mode === 'giornalista') jStart();
+    else if (!C.key) { openSet(); say('Prima incolla la chiave API Gemini.', true); return; }
     wantOn = true; log('ascolta');
+    if (C.mode === 'giornalista') render();
     $('mic').classList.add('on');
     $('mic').innerHTML = '&#9632; FERMA';
     reqWake();
@@ -996,7 +1351,13 @@ $('mic').addEventListener('click', function(){
 });
 
 $('now').addEventListener('click', function(){
-  log('ora', { buf: buf.trim().length, interim: lastInterim.trim().length, inVolo: inflight });
+  if (C.mode === 'giornalista') {
+    if (wantOn) { log('ferma'); stopRec(); }   // l'articolo si scrive sulla sessione intera: prima chiudo l'ascolto
+    var s = jCur();
+    if (s) writeArticle(s);
+    return;
+  }
+  log('ora',{ buf: buf.trim().length, interim: lastInterim.trim().length, inVolo: inflight });
   if (inflight >= MAX_INFLIGHT) { say('Ho già due richieste in volo, un attimo…'); return; }
   if (lastInterim.trim()) {
     // Prendo anche le parole provvisorie (come segmento in coda) e riavvio l'ascolto:
@@ -1038,12 +1399,24 @@ function openSet(){
   $('fAuto').checked = C.auto;
   $('fSrc').checked = C.src;
   $('fWake').checked = C.wake;
+  $('fGUrl').value = C.gurl;
+  ensureOption($('fAModel'), C.amodel);
+  $('fAModel').value = C.amodel || '';
+  $('fALen').value = String(C.alen);
+  $('fAMail').checked = C.amail;
   $('sSet').classList.add('open');
 }
 
 $('bSet').addEventListener('click', openSet);
 $('bCheck').addEventListener('click', checkKey);
 $('bOCheck').addEventListener('click', checkOKey);
+$('bGCheck').addEventListener('click', checkG);
+$('bMode').addEventListener('click', function(){
+  if (wantOn) { say('Ferma prima l’ascolto, poi cambia modalità.', true); return; }
+  C.mode = C.mode === 'giornalista' ? 'gobbo' : 'giornalista';
+  save(); applyMode(); log('modalita', C.mode);
+  say(C.mode === 'giornalista' ? 'Modalità giornalista: trascrivo e basta, ARTICOLO alla fine.' : 'Modalità gobbo: suggerimenti dal vivo.');
+});
 
 $('bSave').addEventListener('click', function(){
   C.key = $('fKey').value.trim();
@@ -1061,6 +1434,10 @@ $('bSave').addEventListener('click', function(){
   C.auto = $('fAuto').checked;
   C.src  = $('fSrc').checked;
   C.wake = $('fWake').checked;
+  C.gurl = $('fGUrl').value.trim();
+  C.amodel = $('fAModel').value;
+  C.alen = parseInt($('fALen').value, 10) || 4000;
+  C.amail = $('fAMail').checked;
   save(); render();
   $('sSet').classList.remove('open');
   say(wantOn ? 'In ascolto...' : 'Salvato. Pronto.');
@@ -1122,6 +1499,10 @@ $('bDiagCopy').addEventListener('click', function(){
 });
 
 $('bWrite').addEventListener('click', function(){
+  var g = C.mode === 'giornalista';
+  $('wTitle').textContent = g ? 'Aggiungi alla trascrizione' : 'Scrivi il testo';
+  $('bGo').textContent = g ? 'Aggiungi' : 'Analizza';
+  $('fText').placeholder = g ? 'Incolla o scrivi il testo da aggiungere in fondo alla sessione…' : 'Incolla o scrivi qui quello che vuoi far analizzare...';
   $('sWrite').classList.add('open');
   setTimeout(function(){ $('fText').focus(); }, 120);
 });
@@ -1131,6 +1512,15 @@ $('bGo').addEventListener('click', function(){
   if (!t) { say('Scrivi qualcosa prima.', true); return; }
   $('sWrite').classList.remove('open');
   $('fText').value = '';
+  if (C.mode === 'giornalista') {
+    if (wantOn) { say('Ferma prima l’ascolto, poi aggiungi il testo.', true); return; }
+    var s = J[0];
+    if (!s || s.articolo) s = jNew();
+    s.testo = joinT(s.testo, t); s.fine = s.agg = Date.now();
+    saveJ(); render(); jServer('salva', s);
+    say('Aggiunto: ' + parole(s.testo) + ' parole nella sessione.');
+    return;
+  }
   run(t, '');
 });
 
@@ -1142,7 +1532,7 @@ for (var si = 0; si < sheets.length; si++) {
 }
 
 /* ============================ avvio ============================ */
-render(); log('avvio', VERSION);
+applyMode(); log('avvio', VERSION);
 if (!SR) say('Riconoscimento vocale non disponibile: usa Chrome su Android. La modalità scrivi funziona comunque.', true);
 else if (!C.key) say('Apri le impostazioni e incolla la chiave API Gemini per iniziare.');
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});

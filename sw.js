@@ -1,7 +1,7 @@
 /* Gobbo - service worker minimale.
    Il guscio dell'app va in cache così si apre anche senza rete;
    le chiamate ai modelli (Gemini, OpenAI) passano sempre dalla rete (mai cache). */
-var CACHE = 'gobbo-v3';
+var CACHE = 'gobbo-v4';
 var SHELL = [
   './',
   './index.html',
@@ -33,6 +33,7 @@ self.addEventListener('fetch', function(e){
   if (req.method !== 'GET') return;
   if (req.url.indexOf('generativelanguage.googleapis.com') !== -1) return;
   if (req.url.indexOf('api.openai.com') !== -1) return;
+  if (/\.php(\?|$)/.test(req.url)) return;   // ponte e archivio: risposte vive, mai dalla cache
 
   // network-first sul guscio, così gli aggiornamenti arrivano subito
   e.respondWith(

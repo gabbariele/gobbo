@@ -22,8 +22,8 @@ $CFG = array(
     'token'    => getenv('GOBBO_TOKEN') ? getenv('GOBBO_TOKEN') : '',
     'origins'  => array(),   // origini extra ammesse (per provare da localhost); vuoto = solo stessa origine
     'models'   => array(),   // elenco chiuso di modelli ammessi; vuoto = qualunque modello di chat OpenAI
-    'timeout'  => 25,        // secondi
-    'max_body' => 200000,    // byte
+    'timeout'  => 90,        // secondi: le schede le taglia prima l'app, gli articoli ne hanno bisogno
+    'max_body' => 600000,    // byte: una trascrizione lunga da trasformare in articolo ci deve stare
 );
 /* Dove cercare la configurazione, in quest'ordine.
  *

@@ -87,6 +87,46 @@ si comporta esattamente come prima.
 In piu' l'app e' `noindex` e c'e' un `robots.txt` che chiude tutto: e' online perche' il
 microfono del browser pretende HTTPS, non perche' debba trovarla qualcuno.
 
+## 1-ter. Modalità giornalista (facoltativo il server)
+
+Il pulsante 📰 in alto cambia mestiere a Gobbo: **niente suggerimenti**, trascrive e basta
+tutto quello che viene detto, per quanto dura. Ogni ASCOLTA/FERMA aggiunge alla stessa
+sessione; «Nuova sessione» ne apre un'altra. Sopra la trascrizione c'è un campo **note**
+(chi parla, evento, testata, taglio): due righe lì migliorano l'articolo più di ogni altra cosa.
+
+Alla fine **ARTICOLO** manda l'intera trascrizione a Gemini (il modello scelto in *⚙ → Modello
+per l'articolo*, di norma quello della riserva, più capace) e ne ricava titolo, occhiello,
+sommario e testo. Il prompt è `SYS_ART` in `index.html`: fedeltà alla trascrizione prima di
+tutto, niente fatti o virgolettati inventati, e dove il riconoscimento vocale ha storpiato un
+nome meglio restare generici che indovinare.
+
+Senza server le sessioni stanno solo nel telefono (ultime 40). Con **`giornale.php`** sul
+server, in più:
+
+- ogni sessione viene **salvata sul server** (un `.md` per sessione) in una cartella *fuori*
+  dal sito, al massimo ogni minuto mentre registri e subito quando fermi;
+- quando l'articolo è pronto arriva **per email**, con trascrizione e articolo nel testo e
+  il `.md` allegato; il pulsante «Email» su ogni sessione la rimanda quando vuoi.
+
+La posta parte via SMTP direttamente da PHP (il server non ha `sendmail`) e va **solo**
+all'indirizzo `mail_to` scritto nella configurazione: la pagina non può scegliere il
+destinatario. `giornale.php` usa lo stesso `openai-config.php` del ponte e la stessa parola
+d'ordine, e senza parola d'ordine rifiuta tutto. Con Google Workspace serve una
+**password per le app** (myaccount.google.com/apppasswords), non la password normale:
+vedi `openai-config.sample.php`.
+
+In nginx va abilitato come il ponte, con una corrispondenza esatta accanto a quella di
+`openai.php`, così ogni altro `.php` resta inerte:
+
+```nginx
+location = /giornale.php {
+    include fastcgi_params;
+    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    fastcgi_pass php83;
+    fastcgi_read_timeout 60s;
+}
+```
+
 ## 2. Metterla online (serve HTTPS)
 
 Il microfono nel browser funziona **solo su HTTPS** o su `localhost`. Due strade:
@@ -194,6 +234,8 @@ I soli destinatari esterni sono quelli di Google: l'audio per il riconoscimento 
 Chrome e il testo per l'API Gemini. Se attivi la seconda riserva, nei momenti in cui interviene
 il testo passa anche dal tuo server e da OpenAI. La chiave OpenAI, a differenza di quella Gemini,
 non sta sul dispositivo: sta nel file di configurazione sul server.
+In modalità giornalista, se configuri `giornale.php`, le sessioni finiscono anche sul tuo
+server (cartella fuori dal sito) e nella tua casella email.
 
 **⚙ → Esporta** produce un file Markdown con tutte le schede (con il testo che le ha generate)
 e la trascrizione completa: su Android apre la condivisione nativa, sul PC lo scarica.
@@ -222,7 +264,8 @@ sito cancella anche la chiave.
 index.html            tutta l'app (interfaccia + logica + prompt)
 robots.txt            tiene l'app fuori dai motori di ricerca
 openai.php            il ponte verso OpenAI (solo se usi la seconda riserva)
-openai-config.sample.php  da copiare in openai-config.php: chiave e parola d'ordine
+giornale.php          archivio ed email della modalità giornalista (facoltativo)
+openai-config.sample.php  da copiare in openai-config.php: chiave, parola d'ordine, SMTP
 manifest.json         metadati PWA per l'installazione
 sw.js                 service worker: guscio in cache, si apre anche offline
 icons/                icone 192 / 512 / maskable
