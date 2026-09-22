@@ -346,7 +346,7 @@ var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
    {id, inizio, fine, agg, testo, note, articolo:{titolo,occhiello,sommario,testo,modello,t}|null,
     srv:{salvato, inviato, err}} - 'agg' e 'srv.salvato' dicono se il server ha l'ultima versione. */
 var J = JSON.parse(localStorage.getItem(LS + '.giornale') || '[]');
-var jId = '', jBase = '';   // sessione che sto registrando, e il suo testo prima di questo ascolto
+var jId = '', jBase = '', jEv = '';   // sessione in registrazione: testo gia' acquisito, e i definitivi di questo ascolto
 
 var rec = null, running = false, wantOn = false;
 var buf = '';          // testo non ancora analizzato, ricomposto dal flusso dei risultati definitivi
@@ -395,7 +395,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-22a';
+var VERSION = '2026-09-22b';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -985,6 +985,7 @@ function renderJ(){
         '<div class="jacts">' +
           (i > 0 ? '<button class="mini" data-j="apri" data-id="' + s.id + '">Espandi</button>' : '') +
           '<button class="mini" data-j="copia" data-id="' + s.id + '">Copia</button>' +
+          (s.testo && !rec0 ? '<button class="mini" data-j="ripulisci" data-id="' + s.id + '">Ripulisci</button>' : '') +
           (C.gurl ? '<button class="mini" data-j="invia" data-id="' + s.id + '">Email</button>' : '') +
           (i > 0 && !rec0 ? '<button class="mini" data-j="art" data-id="' + s.id + '">' + (s.articolo ? 'Riscrivi articolo' : 'Articolo') + '</button>' : '') +
           (i === 0 && !rec0 && (s.testo || s.articolo) ? '<button class="mini" data-j="nuova" data-id="' + s.id + '">Nuova sessione</button>' : '') +
@@ -1015,6 +1016,16 @@ out.addEventListener('click', function(e){
     navigator.clipboard.writeText(jPlain(s)).then(function(){
       b.textContent = 'Copiato'; setTimeout(function(){ b.textContent = 'Copia'; }, 1400);
     }).catch(function(){ say('Copia non riuscita', true); });
+  } else if (az === 'ripulisci') {
+    b.textContent = 'Guardo…';
+    setTimeout(function(){
+      var prima = parole(s.testo), pulito = ripulisci(s.testo), dopo = parole(pulito);
+      b.textContent = 'Ripulisci';
+      if (dopo >= prima) { say('Niente da ripulire: nessuna ripetizione trovata.'); return; }
+      if (!confirm('Tolgo le ripetizioni: da ' + prima + ' a ' + dopo + ' parole.\n\nControlla il risultato: se non va bene, l’articolo già scritto resta comunque.')) return;
+      s.testo = pulito; s.agg = Date.now(); saveJ(); render();
+      say('Ripulita: ' + dopo + ' parole, erano ' + prima + '.');
+    }, 30);
   } else if (az === 'invia') {
     jServer('invia', s);
   } else if (az === 'art') {
@@ -1026,6 +1037,42 @@ out.addEventListener('click', function(e){
     J = J.filter(function(x){ return x !== s; }); saveJ(); render();
   }
 });
+
+/* Ripara le trascrizioni fatte con la versione di prima, dove ogni riedizione di una frase
+   si sommava alle precedenti: "Buonasera / Buonasera a tutti / Buonasera a tutti grazie...".
+   Il segno e' sempre lo stesso, un blocco di parole ripetuto due volte di fila: della coppia
+   tengo la seconda, che e' la versione piu' recente. Confronto senza maiuscole perche' Chrome
+   le cambia mentre corregge. Blocchi di almeno due parole: "no no" detto davvero resta. */
+function ripulisci(t){
+  var w = String(t).split(/\s+/).filter(Boolean), n = w.length;
+  if (n < 4) return String(t).trim();
+  var low = w.map(function(x){ return x.toLowerCase(); });
+  var L = low.join(' '), off = new Array(n + 1), z = 0;
+  for (var p = 0; p < n; p++) { off[p] = z; z += low[p].length + 1; }
+  off[n] = z;
+  /* Cerco l'inizio di una ripetizione solo dove una parola comincia come quella di adesso:
+     senza questo indice bisognerebbe provare ogni distanza a ogni parola, e su una trascrizione
+     lunga non finirebbe piu'. */
+  var chiave = function(s){ return s.slice(0, 3); };
+  var dove = {};
+  for (p = 0; p < n; p++) { var c = chiave(low[p]); (dove[c] || (dove[c] = [])).push(p); }
+  var out = [], i = 0, MAXB = 800;
+  while (i < n) {
+    var lim = Math.min(MAXB, (n - i) >> 1), pos = dove[chiave(low[i])] || [], k = 0;
+    for (var q = pos.length - 1; q >= 0; q--) {
+      var d = pos[q] - i;
+      if (d > lim) continue;
+      if (d < 1) break;
+      /* Il blocco va tolto se e' l'INIZIO di quello che segue, non solo se e' identico:
+         Chrome allunga la stessa frase un pezzo per volta, anche a meta' parola
+         ("soci", "socio", "socio consorti"), e la versione buona e' sempre l'ultima. */
+      if (L.startsWith(L.slice(off[i], off[i + d] - 1), off[i + d])) { k = d; break; }
+    }
+    if (k) i += k;
+    else { out.push(w[i]); i++; }
+  }
+  return out.join(' ');
+}
 
 function jPlain(s){
   var t = '';
@@ -1039,9 +1086,10 @@ function jPlain(s){
 
 /* Ogni frase finale arriva qui: aggiorno la sessione e solo il suo riquadro,
    senza ridisegnare la pagina (si perderebbe il cursore nelle note). */
-function jLive(gotFinal){
+function jLive(evF, interim, gotFinal){
   var s = jCur(); if (!s) return;
-  s.testo = joinT(jBase, buf); s.fine = s.agg = Date.now();
+  jEv = evF; lastInterim = interim;
+  s.testo = joinT(jBase, jEv); s.fine = s.agg = Date.now();
   if (gotFinal) { saveJ(); jSchedule(); }
   var el = $('jt-' + s.id);
   if (el) {
@@ -1055,17 +1103,27 @@ function jLive(gotFinal){
 function jStart(){
   var s = J[0];
   if (!s || s.articolo) s = jNew();   // con l'articolo gia' scritto la sessione e' chiusa: ne apro un'altra
-  jId = s.id; jBase = s.testo;
+  jId = s.id; jBase = s.testo; jEv = '';
   chunkText = ''; curFinal = ''; sentFinal = ''; buf = ''; lastInterim = ''; chunkStart = 0;
   if (!s.testo) s.inizio = Date.now();
   log('giornale.ascolto', { id: s.id, car: s.testo.length });
+}
+
+/* Chrome chiude il riconoscimento da solo ogni tanto, e con l'istanza nuova riparte da un
+   elenco vuoto: quello che ha gia' capito va messo al sicuro PRIMA, o al prossimo evento
+   verrebbe sostituito invece che continuato. Tengo anche le parole ancora provvisorie:
+   fermandosi, Chrome spesso non le conferma piu', e sono proprio le ultime dette. */
+function jCommit(){
+  jBase = joinT(jBase, joinT(jEv, lastInterim));
+  jEv = ''; lastInterim = '';
 }
 
 /* Alla fine tengo anche le parole ancora provvisorie: fermandosi, Chrome spesso non le
    conferma piu', e sono proprio le ultime dette. */
 function jStop(){
   var s = jCur(); if (!s) return;
-  s.testo = joinT(jBase, joinT(buf, lastInterim)); s.fine = s.agg = Date.now();
+  jCommit();
+  s.testo = jBase; s.fine = s.agg = Date.now();
   saveJ(); render();
   say('Fermato: ' + parole(s.testo) + ' parole salvate' + (C.gurl ? '' : ' sul telefono') + '. ARTICOLO per scriverne il pezzo.');
   jServer('salva', s);
@@ -1220,6 +1278,7 @@ function startRec(){
 
   rec.onend = function(){
     running = false;
+    if (C.mode === 'giornalista') jCommit();   // l'istanza nuova ripartira' da un elenco vuoto
     if (!wantOn) { dot.classList.remove('on'); return; }
     // Chrome chiude il riconoscimento da solo ogni tanto: lo riapro. Se e' caduta la rete
     // aspetto di piu, altrimenti si avvita in un ciclo di start/errore.
@@ -1257,7 +1316,11 @@ function onResult(e){
   buf = (chunkText + stripSent(curFinal)).replace(/\s+/g, ' ').replace(/^ /, '');
   if (buf && buf.charAt(buf.length - 1) !== ' ') buf += ' ';
   lastInterim = interim;
-  if (C.mode === 'giornalista') { if (gotFinal) log('sr.result', { n: n, car: buf.length }); jLive(gotFinal); return; }
+  /* Giornalista: non ricostruisco niente. 'evF' e' gia' tutto il definitivo di QUESTO ascolto,
+     e il testo della sessione e' sempre "quello che avevo prima" + evF. Le riedizioni di una
+     frase (Chrome ne manda parecchie, e cambia anche le maiuscole) finiscono dentro evF e
+     spariscono da sole: nessuna somma, quindi niente da duplicare. */
+  if (C.mode === 'giornalista') { if (gotFinal) log('sr.result', { n: n, car: evF.length }); jLive(evF, interim, gotFinal); return; }
   if (gotFinal) saveFull();
 
   log('sr.result', { n: n, finale: gotFinal, buf: buf.trim().length, interim: interim.length });
