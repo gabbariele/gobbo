@@ -86,8 +86,10 @@ function dentro_al_sito($dir) {
     return strpos(rtrim(str_replace('\\', '/', $dove), '/') . '/', $radice) === 0;
 }
 
+/* Basta l'indirizzo di arrivo e un server a cui parlare. Utente e password sono
+   facoltativi: un relay interno, o uno che riconosce il server dall'IP, non li vuole. */
 function smtp_pronto($CFG) {
-    return $CFG['mail_to'] !== '' && $CFG['smtp']['host'] !== '' && $CFG['smtp']['user'] !== '' && $CFG['smtp']['pass'] !== '';
+    return $CFG['mail_to'] !== '' && $CFG['smtp']['host'] !== '';
 }
 
 /* Mostro a chi andra' la posta senza scriverlo per intero: la pagina e' pubblica. */
@@ -207,7 +209,9 @@ $msg .= '--' . $confine . "--\r\n";
    non parte. Porta 465 = TLS da subito; 587 = in chiaro e poi STARTTLS. */
 function smtp_invia($c, $da, $a, $msg) {
     $host = $c['host']; $port = (int) $c['port'];
-    $ssl = ($c['secure'] === 'ssl' || $port === 465);
+    $modo = isset($c['secure']) ? strtolower((string) $c['secure']) : '';
+    $ssl = ($modo === 'ssl' || ($modo === '' && $port === 465));
+    $starttls = ($modo !== 'none' && !$ssl);
     $fp = @stream_socket_client(($ssl ? 'ssl://' : 'tcp://') . $host . ':' . $port, $errno, $errstr, 15);
     if (!$fp) { return 'connessione a ' . $host . ':' . $port . ' non riuscita (' . $errstr . ')'; }
     stream_set_timeout($fp, 20);
@@ -225,16 +229,20 @@ function smtp_invia($c, $da, $a, $msg) {
     try {
         $cmd(null, 220);
         $cmd('EHLO gobbo', 250);
-        if (!$ssl) {
+        if ($starttls) {
             $cmd('STARTTLS', 220);
             if (!stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLSv1_2_CLIENT | STREAM_CRYPTO_METHOD_TLSv1_3_CLIENT)) {
                 throw new Exception('STARTTLS non riuscito');
             }
             $cmd('EHLO gobbo', 250);
         }
-        $cmd('AUTH LOGIN', 334);
-        $cmd(base64_encode($c['user']), 334);
-        $cmd(base64_encode($c['pass']), 235);
+        /* Senza utente non chiedo di entrare: un relay che riconosce il server dall'IP
+           risponderebbe "autenticazione non supportata" e non se ne farebbe niente. */
+        if ((string) $c['user'] !== '') {
+            $cmd('AUTH LOGIN', 334);
+            $cmd(base64_encode($c['user']), 334);
+            $cmd(base64_encode($c['pass']), 235);
+        }
         $cmd('MAIL FROM:<' . $da . '>', 250);
         $cmd('RCPT TO:<' . $a . '>', 250);
         $cmd('DATA', 354);

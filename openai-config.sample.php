@@ -52,9 +52,15 @@ return array(
        quell'indirizzo o un suo alias, altrimenti Google lo riscrive. */
     'mail_from' => '',
 
-    /* Con Google Workspace: smtp.gmail.com, 465, ssl, l'indirizzo come utente e una
+    /* Se hai gia' un SMTP che funziona per altre app sullo stesso server, copia quei
+       valori: host, porta, utente e password sono gli stessi che usano loro.
+       'secure': 'ssl' (di solito porta 465), 'tls' (STARTTLS, di solito 587),
+       'none' (in chiaro: solo verso un relay interno, per esempio 127.0.0.1:25).
+       Utente e password vuoti = nessuna autenticazione: va bene per un relay che
+       riconosce il server dall'indirizzo IP.
+       Con Google Workspace: smtp.gmail.com, 465, ssl, l'indirizzo come utente e una
        "password per le app" (myaccount.google.com/apppasswords, serve la verifica in
-       due passaggi), non la password normale. Con 587 usa 'secure' => 'tls'. */
+       due passaggi), non la password normale. */
     'smtp' => array(
         'host'   => 'smtp.gmail.com',
         'port'   => 465,
