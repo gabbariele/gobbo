@@ -182,6 +182,9 @@ if ($art) {
 if ($note !== '') { $corpo .= "NOTE\n" . $note . "\n\n"; }
 $corpo .= "TRASCRIZIONE" . ($inizio !== '' ? ' (' . $inizio . ')' : '') . "\n\n" . ($testo !== '' ? $testo : '(vuota)') . "\n";
 $corpo .= "\n--\nSalvata anche sul server: " . $id . ".md\n";
+if (strlen($corpo) > 8000000) {
+    $corpo = substr($corpo, 0, 8000000) . "\n\n[...] Il resto e solo nel file sul server: " . $id . ".md\n";
+}
 
 function intestazione($s) { return '=?UTF-8?B?' . base64_encode($s) . '?='; }
 
@@ -198,11 +201,17 @@ $msg .= 'Content-Type: multipart/mixed; boundary="' . $confine . "\"\r\n\r\n";
 $msg .= '--' . $confine . "\r\n";
 $msg .= "Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n";
 $msg .= chunk_split(base64_encode($corpo), 76, "\r\n");
-$msg .= '--' . $confine . "\r\n";
-$msg .= 'Content-Type: text/markdown; charset=UTF-8; name="' . $id . ".md\"\r\n";
-$msg .= 'Content-Disposition: attachment; filename="' . $id . ".md\"\r\n";
-$msg .= "Content-Transfer-Encoding: base64\r\n\r\n";
-$msg .= chunk_split(base64_encode($md), 76, "\r\n");
+/* I relay hanno un tetto per messaggio (MailUp lo dichiara a 10 MB). Il corpo lo mando
+   sempre; l'allegato, che e' la stessa roba in un file, lo lascio fuori se sfora. La copia
+   completa resta comunque nell'archivio sul server. */
+$limite = isset($CFG['smtp']['max_msg']) ? (int) $CFG['smtp']['max_msg'] : 9000000;
+if (strlen($msg) + (strlen($md) * 4 / 3) < $limite) {
+    $msg .= '--' . $confine . "\r\n";
+    $msg .= 'Content-Type: text/markdown; charset=UTF-8; name="' . $id . ".md\"\r\n";
+    $msg .= 'Content-Disposition: attachment; filename="' . $id . ".md\"\r\n";
+    $msg .= "Content-Transfer-Encoding: base64\r\n\r\n";
+    $msg .= chunk_split(base64_encode($md), 76, "\r\n");
+}
 $msg .= '--' . $confine . "--\r\n";
 
 /* Un client SMTP minimo: sul server non c'e' sendmail, e PHP mail() senza sendmail
