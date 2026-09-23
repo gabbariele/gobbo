@@ -158,6 +158,7 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
 .b-a h3{color:var(--amber)}
 .b-a .occ{font-size:12.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
 .b-a h4{margin:0 0 6px;font-size:19px;line-height:1.25}
+.b-a h5{margin:14px 0 6px;font-size:14px;letter-spacing:.02em;color:var(--amber)}
 .b-a .som{font-weight:600;margin-bottom:9px}
 .b-a p{margin:0 0 9px}
 .jacts{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
@@ -266,9 +267,10 @@ input[type=checkbox]{width:21px;height:21px;accent-color:var(--amber);flex:0 0 a
       <div>
         <label>Lunghezza</label>
         <select id="fALen">
-          <option value="2500">breve (~2.500 battute)</option>
-          <option value="4000">media (~4.000)</option>
-          <option value="6000">lunga (~6.000)</option>
+          <option value="3000">breve (~3.000 battute)</option>
+          <option value="6000">media (~6.000)</option>
+          <option value="9000">lunga (~9.000)</option>
+          <option value="13000">molto lunga (~13.000)</option>
         </select>
       </div>
     </div>
@@ -339,7 +341,7 @@ var LS = 'gobbo.v1';
 var D = {key:'', ctx:'', model:'gemini-3.5-flash', fallback:'gemini-3.7-flash',
          oproxy:'', otoken:'', fallback2:'gpt-5-mini', omodels:[],
          pause:2.5, every:30, budget:20, fast:true, auto:true, src:false, wake:true, models:[],
-         mode:'gobbo', gurl:'', amodel:'', alen:4000, amail:true};
+         mode:'gobbo', gurl:'', amodel:'', alen:9000, amail:true};
 var C = Object.assign({}, D, JSON.parse(localStorage.getItem(LS) || '{}'));
 var hist = JSON.parse(localStorage.getItem(LS + '.hist') || '[]');
 /* Sessioni della modalita' giornalista, dalla piu' recente. Ciascuna:
@@ -395,7 +397,7 @@ var lastErr = null;  // ultimo errore del riconoscimento vocale, per decidere qu
 var chunkStart = 0;  // quando e' iniziato il pezzo nel buffer, per l'invio "comunque ogni N secondi"
 var lastInterim = ''; // parole ancora provvisorie (non finali): ORA le manda insieme al resto
 var API = 'https://generativelanguage.googleapis.com/v1beta/';
-var VERSION = '2026-09-22b';
+var VERSION = '2026-09-23a';
 
 /* Registro degli eventi: quando "non compaiono piu' i suggerimenti" questo dice dove si ferma
    la catena (microfono -> segmenti -> innesco -> richiesta -> risposta). */
@@ -663,39 +665,57 @@ var OSCHEMA = {
 
 /* ============================ articolo (modalita' giornalista) ============================ */
 var SYS_ART = [
-'Sei un giornalista professionista italiano. Ricevi la trascrizione automatica di un intervento, un incontro o un’intervista, registrata dal vivo con il riconoscimento vocale del telefono: contiene errori di riconoscimento, parole storpiate, punteggiatura assente o sbagliata, e non distingue chi sta parlando.',
-'Scrivi un articolo giornalistico in italiano basato SOLO su quella trascrizione e sulle note del giornalista.',
+'Sei un giornalista italiano che scrive per una testata locale online: pezzi lunghi e curati, di quelli che si leggono fino in fondo.',
+'Ricevi la trascrizione automatica di un incontro, un convegno o un’intervista, registrata dal vivo con il riconoscimento vocale del telefono: contiene errori di riconoscimento, parole storpiate, punteggiatura assente o sbagliata, e non distingue chi sta parlando.',
+'Scrivi un articolo RACCONTATO, non un lancio d’agenzia, basato SOLO su quella trascrizione e sulle note del giornalista.',
 '',
-'Fedeltà prima di tutto:',
-'- solo fatti, nomi, cifre e affermazioni che compaiono nella trascrizione o nelle note. Non aggiungere contesto, dati o dichiarazioni che non ci sono;',
-'- se un nome, un numero o un termine è evidentemente storpiato dal riconoscimento vocale e non sei sicuro di come correggerlo, resta generico o omettilo: non indovinare;',
-'- virgolettati solo per frasi pronunciate davvero, ripulite il minimo indispensabile (errori di trascrizione, intercalari, ripetizioni) senza cambiarne il senso. Attribuiscili solo se chi parla è chiaro dal testo o dalle note; altrimenti riporta in forma indiretta.',
+'FEDELTÀ — viene prima di tutto:',
+'- solo fatti, nomi, date, cifre e affermazioni che compaiono nella trascrizione o nelle note. Non aggiungere contesto storico, dati o dichiarazioni che lì non ci sono, nemmeno se li conosci;',
+'- se un nome, un anno o un termine è evidentemente storpiato dal riconoscimento e non sei sicuro di come correggerlo, resta generico o omettilo: non indovinare;',
+'- virgolettati solo per frasi pronunciate davvero, ripulite il minimo indispensabile (errori di trascrizione, intercalari, ripetizioni) senza cambiarne il senso. Uno o due per sezione, non di più. Attribuiscili solo se chi parla è chiaro dal testo o dalle note; altrimenti riporta in forma indiretta.',
 '',
-'Forma:',
-'- titolo informativo, non urlato; occhiello breve; sommario di una o due frasi;',
-'- attacco forte che dica subito la notizia (chi, cosa, dove, quando, perché, se ricavabili), poi piramide rovesciata, paragrafi brevi;',
-'- registro da quotidiano: neutro, preciso, niente enfasi promozionale, niente giudizi tuoi, niente frasi di chiusura retoriche;',
-'- nel campo testo separa i paragrafi con una riga vuota, senza titoletti né markdown.'
+'STRUTTURA:',
+'- titolo che dica il tema e prometta il racconto, non un’etichetta;',
+'- sommario: due o quattro frasi, il cappello che dice chi c’era e che storia si legge qui sotto;',
+'- da cinque a nove sezioni, ognuna con un sottotitolo breve, e dentro due-sei paragrafi. Le sezioni seguono il filo del racconto, non l’ordine in cui le cose sono state dette: metti insieme quello che appartiene allo stesso pezzo di storia, anche se è emerso in momenti diversi.',
+'',
+'SCRITTURA:',
+'- l’attacco parte da un’idea o da un dettaglio concreto sentito nella registrazione. Mai cominciare con «Nel corso dell’incontro», «Si è tenuta», «Durante la serata»;',
+'- paragrafi brevi, una o due frasi. Ogni tanto una riga da sola, quando serve a dare respiro;',
+'- alterna il racconto, il contesto e la voce di chi ha parlato;',
+'- i dettagli concreti valgono più degli aggettivi: un luogo, un orario, una cifra, un gesto;',
+'- niente elenchi puntati, niente markdown, niente «in conclusione», niente frasi da comunicato («una serata all’insegna di…»);',
+'- chiudi con un pensiero che resta, ricavato da quello che è stato detto: non un riassunto e non una morale appiccicata.',
+'',
+'TONO: caldo ma sobrio. Nessuna enfasi pubblicitaria, nessun giudizio tuo, nessuna retorica.',
+'Nel campo testo di ogni sezione separa i paragrafi con una riga vuota, senza titoletti né markdown.'
 ].join('\n');
 
 var ASCHEMA = {
   type: "object",
   properties: {
-    titolo:    { type: "string" },
-    occhiello: { type: "string" },
-    sommario:  { type: "string" },
-    testo:     { type: "string" }
+    titolo:   { type: "string" },
+    sommario: { type: "string" },
+    sezioni:  {
+      type: "array",
+      items: {
+        type: "object",
+        properties: { titolo: { type: "string" }, testo: { type: "string" } },
+        required: ["titolo", "testo"]
+      }
+    }
   },
-  required: ["titolo", "occhiello", "sommario", "testo"]
+  required: ["titolo", "sommario", "sezioni"]
 };
 var AOSCHEMA = JSON.parse(JSON.stringify(ASCHEMA));
 AOSCHEMA.additionalProperties = false;
+AOSCHEMA.properties.sezioni.items.additionalProperties = false;   // OpenAI in modalità strict lo pretende a ogni livello
 
 function buildArtPrompt(s){
   var u = '';
   if ((s.note || '').trim()) u += 'NOTE DEL GIORNALISTA (chi parla, dove, per chi scrivo, che taglio):\n' + s.note.trim() + '\n\n';
   u += 'DATA DELLA REGISTRAZIONE: ' + new Date(s.inizio).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) + '\n';
-  u += 'LUNGHEZZA DELL’ARTICOLO: circa ' + C.alen + ' battute, spazi inclusi.\n\n';
+  u += 'LUNGHEZZA DELL’ARTICOLO: circa ' + C.alen + ' battute in tutto, spazi inclusi.\n\n';
   u += 'TRASCRIZIONE:\n"""' + s.testo.trim() + '"""';
   return u;
 }
@@ -955,13 +975,30 @@ function jMeta(s){
 }
 function updateMeta(s){ var el = $('jm-' + s.id); if (el) el.innerHTML = jMeta(s); }
 
+function parag(t){
+  return String(t || '').split(/\n\s*\n/).filter(function(p){ return p.trim(); })
+           .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
+}
 function artHtml(a){
-  var ps = String(a.testo || '').split(/\n\s*\n/).filter(function(p){ return p.trim(); })
-             .map(function(p){ return '<p>' + esc(p.trim()) + '</p>'; }).join('');
+  /* Gli articoli scritti prima del 23 settembre hanno un testo unico e l'occhiello:
+     continuano a comparire come sono stati scritti. */
+  var corpo = a.sezioni && a.sezioni.length
+    ? a.sezioni.map(function(s){ return '<h5>' + esc(s.titolo) + '</h5>' + parag(s.testo); }).join('')
+    : parag(a.testo);
   return '<section class="blk b-a"><h3>Articolo &mdash; ' + esc(short(a.modello || '')) + '</h3>' +
     (a.occhiello ? '<div class="occ">' + esc(a.occhiello) + '</div>' : '') +
     '<h4>' + esc(a.titolo) + '</h4>' +
-    (a.sommario ? '<p class="som">' + esc(a.sommario) + '</p>' : '') + ps + '</section>';
+    (a.sommario ? '<p class="som">' + esc(a.sommario) + '</p>' : '') + corpo + '</section>';
+}
+/* Articolo in testo semplice, per la copia e per l'email. */
+function artTesto(a){
+  var t = a.titolo + '\n\n' + (a.sommario ? a.sommario + '\n\n' : '');
+  if (a.sezioni && a.sezioni.length) {
+    for (var i = 0; i < a.sezioni.length; i++) t += a.sezioni[i].titolo + '\n\n' + a.sezioni[i].testo + '\n\n';
+  } else {
+    t += (a.testo || '') + '\n\n';
+  }
+  return t.trim();
 }
 
 var EMPTY_J = '<div class="empty"><span class="big">&#128240;</span>' +
@@ -1076,10 +1113,7 @@ function ripulisci(t){
 
 function jPlain(s){
   var t = '';
-  if (s.articolo) {
-    var a = s.articolo;
-    t += (a.occhiello ? a.occhiello + '\n\n' : '') + a.titolo + '\n\n' + (a.sommario ? a.sommario + '\n\n' : '') + a.testo + '\n\n----\n\n';
-  }
+  if (s.articolo) t += artTesto(s.articolo) + '\n\n----\n\n';
   if (s.note) t += 'NOTE\n' + s.note + '\n\n';
   return t + 'TRASCRIZIONE (' + oraBreve(s.inizio) + ')\n\n' + s.testo;
 }
@@ -1177,7 +1211,8 @@ function writeArticle(s){
   say('Scrivo l’articolo da ' + parole(s.testo) + ' parole… può volerci un minuto.');
   log('articolo.richiesta', { id: s.id, car: s.testo.length });
   ask(buildArtPrompt(s), optArticolo()).then(function(a){
-    s.articolo = { titolo: a.titolo || '', occhiello: a.occhiello || '', sommario: a.sommario || '', testo: a.testo || '',
+    s.articolo = { titolo: a.titolo || '', sommario: a.sommario || '',
+                   sezioni: (a.sezioni || []).filter(function(x){ return x && x.testo; }),
                    modello: a.model, t: Date.now() };
     s.agg = Date.now(); saveJ(); render();
     log('articolo.ok', { id: s.id, modello: a.model, tentativi: a.attempts });

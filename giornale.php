@@ -140,12 +140,26 @@ $md = '# ' . ($titolo !== '' ? $titolo : 'Trascrizione del ' . ($inizio !== '' ?
 $md .= '_Sessione ' . $id . ($inizio !== '' ? ' · ' . $inizio . ($fine_s !== '' && $fine_s !== $inizio ? ' - ' . $fine_s : '') : '') .
        ' · ' . preg_match_all('/\S+/u', $testo) . " parole_\n\n";
 if ($note !== '') { $md .= "## Note\n\n" . $note . "\n\n"; }
+/* L'articolo arriva a sezioni (titolo + testo). Quelli scritti prima del 23 settembre
+   hanno invece un testo unico e un occhiello: li scrivo come sono. */
+function sezioni_di($art) {
+    return isset($art['sezioni']) && is_array($art['sezioni']) ? $art['sezioni'] : array();
+}
 if ($art) {
     $md .= "## Articolo\n\n";
     if (campo($art, 'occhiello') !== '') { $md .= '_' . campo($art, 'occhiello') . "_\n\n"; }
     if ($titolo !== '') { $md .= '### ' . $titolo . "\n\n"; }
     if (campo($art, 'sommario') !== '') { $md .= '**' . campo($art, 'sommario') . "**\n\n"; }
-    $md .= campo($art, 'testo') . "\n\n";
+    $sez = sezioni_di($art);
+    if ($sez) {
+        foreach ($sez as $s1) {
+            if (!is_array($s1)) { continue; }
+            if (campo($s1, 'titolo') !== '') { $md .= '#### ' . campo($s1, 'titolo') . "\n\n"; }
+            $md .= campo($s1, 'testo') . "\n\n";
+        }
+    } else {
+        $md .= campo($art, 'testo') . "\n\n";
+    }
     if (campo($art, 'modello') !== '') { $md .= '_Scritto da ' . campo($art, 'modello') . " a partire dalla trascrizione qui sotto._\n\n"; }
 }
 $md .= "## Trascrizione\n\n" . ($testo !== '' ? $testo : '(vuota)') . "\n";
@@ -176,7 +190,16 @@ if ($art) {
     if (campo($art, 'occhiello') !== '') { $corpo .= campo($art, 'occhiello') . "\n\n"; }
     $corpo .= $titolo . "\n" . str_repeat('=', 40) . "\n\n";
     if (campo($art, 'sommario') !== '') { $corpo .= campo($art, 'sommario') . "\n\n"; }
-    $corpo .= campo($art, 'testo') . "\n\n";
+    $sez = sezioni_di($art);
+    if ($sez) {
+        foreach ($sez as $s1) {
+            if (!is_array($s1)) { continue; }
+            if (campo($s1, 'titolo') !== '') { $corpo .= campo($s1, 'titolo') . "\n\n"; }
+            $corpo .= campo($s1, 'testo') . "\n\n";
+        }
+    } else {
+        $corpo .= campo($art, 'testo') . "\n\n";
+    }
     $corpo .= str_repeat('-', 40) . "\n\n";
 }
 if ($note !== '') { $corpo .= "NOTE\n" . $note . "\n\n"; }
